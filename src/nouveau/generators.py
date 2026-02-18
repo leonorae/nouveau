@@ -2,21 +2,23 @@
 Generator strategies for poem line generation.
 
 Two-layer architecture:
-  ContextFn   = (Poem) -> str
-                Extracts a prompt from the poem. Pure selection, no model call.
-                Operates at any granularity: line, word, token.
+  ContextFn   = (Poem) -> str        # what text to extract from the poem
+  GeneratorFn = (Poem, Model) -> str # model call that produces a new line
 
-  GeneratorFn = (Poem, Model) -> str
-                Calls the model with a context prompt and returns a new line.
+Combinators:
+  make_generator(context_fn)                          # basic bridge
+  make_conditional(condition, if_true, if_false)      # state-dependent dispatch
+  make_constrained_generator(context_fn, make_score)  # rejection-sample by cost
 
-make_generator(context_fn) bridges the two layers.
-make_conditional(condition, if_true, if_false) composes generators.
+Score factories produce a (Poem) -> (str) -> float cost function that
+make_constrained_generator uses to pick the best of n_candidates outputs.
 
 Every generator in GENERATORS is a GeneratorFn. Strategies are model-agnostic;
-names reflect selection logic, not the backend.
+names reflect selection and constraint logic, not the backend.
 """
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Callable, Union
 
 if TYPE_CHECKING:
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
 
 ContextFn = Callable[["Poem"], str]
 GeneratorFn = Callable[["Poem", "Model"], str]
+ScoreFactory = Callable[["Poem"], Callable[[str], float]]
 LineSelector = Union[int, list[int], slice]
 
 
@@ -47,6 +50,24 @@ def make_conditional(
     """Return a generator that dispatches to if_true or if_false based on poem state."""
     def _generator(poem: "Poem", model: "Model") -> str:
         return (if_true if condition(poem) else if_false)(poem, model)
+    return _generator
+
+
+def make_constrained_generator(
+    context_fn: ContextFn,
+    make_score: ScoreFactory,
+    n_candidates: int = 8,
+) -> GeneratorFn:
+    """Generate n_candidates outputs and return the one with the lowest score.
+
+    make_score(poem) is called once per turn and returns a cost function
+    (str) -> float over candidate strings (lower = better fit).
+    """
+    def _generator(poem: "Poem", model: "Model") -> str:
+        context = context_fn(poem)
+        score = make_score(poem)
+        candidates = [model.generate(context) for _ in range(n_candidates)]
+        return min(candidates, key=score)
     return _generator
 
 
@@ -102,6 +123,87 @@ def first_words(n: int) -> ContextFn:
 
 
 # ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
+def _end_sound(word: str, n: int = 3) -> str:
+    """Return the last n characters of a word (stripped of punctuation).
+
+    Used as a coarse phonetic key for rhyme matching. Replace with
+    pronouncing/cmudict for proper phoneme-level accuracy.
+    """
+    word = word.lower().rstrip(".,!?;:'\"")
+    return word[-n:] if len(word) >= n else word
+
+
+def count_syllables(text: str) -> int:
+    """Approximate syllable count by counting vowel-sound clusters.
+
+    Rough heuristic (silent e, diphthongs, etc. are ignored). pyphen or
+    cmudict give more accurate results when precision matters.
+    """
+    count = len(re.findall(r"[aeiouy]+", text.lower()))
+    return max(1, count)
+
+
+_sentiment_analyzer = None
+
+
+def _get_sentiment_analyzer():
+    """Lazily instantiate the VADER sentiment analyzer (cached singleton)."""
+    global _sentiment_analyzer
+    if _sentiment_analyzer is None:
+        try:
+            from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+            _sentiment_analyzer = SentimentIntensityAnalyzer()
+        except ImportError as exc:
+            raise ImportError(
+                "sentiment generators require vaderSentiment: uv add vaderSentiment"
+            ) from exc
+    return _sentiment_analyzer
+
+
+# ---------------------------------------------------------------------------
+# Score factories
+# ---------------------------------------------------------------------------
+
+def syllable_scorer(target: int) -> ScoreFactory:
+    """Cost = absolute distance from target syllable count."""
+    return lambda poem: lambda text: abs(count_syllables(text) - target)
+
+
+def rhyme_scorer(n_chars: int = 3) -> ScoreFactory:
+    """Cost = 0.0 if last word rhymes with last word of previous line, else 1.0.
+
+    'Rhyme' is approximated by matching the last n_chars of each word.
+    """
+    def make_score(poem: "Poem") -> Callable[[str], float]:
+        if not poem.lines:
+            return lambda text: 0.0
+        ref = _end_sound(poem[-1].split()[-1], n_chars)
+
+        def score(text: str) -> float:
+            words = text.strip().split()
+            if not words:
+                return 1.0
+            return 0.0 if _end_sound(words[-1], n_chars) == ref else 1.0
+
+        return score
+    return make_score
+
+
+def sentiment_scorer(target: float) -> ScoreFactory:
+    """Cost = absolute distance from target VADER compound sentiment.
+
+    target range: -1.0 (most negative) to 1.0 (most positive), 0.0 = neutral.
+    """
+    def make_score(poem: "Poem") -> Callable[[str], float]:
+        analyzer = _get_sentiment_analyzer()
+        return lambda text: abs(analyzer.polarity_scores(text)["compound"] - target)
+    return make_score
+
+
+# ---------------------------------------------------------------------------
 # Named generator instances
 # ---------------------------------------------------------------------------
 
@@ -118,28 +220,12 @@ closure = make_conditional(
     if_false=last,
 )
 
-
-# ---------------------------------------------------------------------------
-# Future generators (stubs — not yet registered)
-# ---------------------------------------------------------------------------
-# Architecture notes for generators requiring model.py extensions:
-#
-# rhyme:
-#   context_fn: last_lines(1) or last_words(n)
-#   Extra: model.generate() needs `bias_toward` accepting rhyme candidates.
-#   Compute candidates via pronouncing/cmudict from the previous AI line,
-#   pass as logit biases or a constrained prompt suffix.
-#
-# syllable:
-#   context_fn: any selector
-#   Extra: post-process token stream to hit a target syllable count (pyphen/cmudict),
-#   or wrap model.generate() in a rejection-sampler loop.
-#
-# sentiment_arc:
-#   context_fn: any selector
-#   Extra: `sentiment_target: float` on model.generate(). Score candidates with
-#   vader/textblob; re-sample until within tolerance or rank beam candidates.
-#   Natural arc: neutral → tension → quiet resolution.
+# constrained: pick the best of n_candidates by the given cost function
+haiku_5 = make_constrained_generator(last_lines(1), syllable_scorer(5))
+haiku_7 = make_constrained_generator(last_lines(1), syllable_scorer(7))
+rhyme   = make_constrained_generator(last_lines(1), rhyme_scorer())
+hopeful = make_constrained_generator(last_lines(1), sentiment_scorer(0.6))
+somber  = make_constrained_generator(last_lines(1), sentiment_scorer(-0.6))
 
 
 GENERATORS: dict[str, GeneratorFn] = {
@@ -149,4 +235,9 @@ GENERATORS: dict[str, GeneratorFn] = {
     "bookend":     bookend,
     "alternating": alternating,
     "closure":     closure,
+    "haiku_5":     haiku_5,
+    "haiku_7":     haiku_7,
+    "rhyme":       rhyme,
+    "hopeful":     hopeful,
+    "somber":      somber,
 }

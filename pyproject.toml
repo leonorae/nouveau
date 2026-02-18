@@ -8,6 +8,7 @@ dependencies = [
     "transformers>=4.40",
     "torch>=2.0",
     "datasets>=2.0",
+    "vadersentiment>=3.3.2",
 ]
 
 [project.scripts]

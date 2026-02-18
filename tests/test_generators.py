@@ -1,7 +1,9 @@
 from nouveau.generators import (
+    _end_sound,
     alternating,
     bookend,
     closure,
+    count_syllables,
     first,
     first_lines,
     first_words,
@@ -10,7 +12,11 @@ from nouveau.generators import (
     last_words,
     line_window,
     make_conditional,
+    make_constrained_generator,
     make_generator,
+    rhyme_scorer,
+    sentiment_scorer,
+    syllable_scorer,
     window,
 )
 from nouveau.poem import Poem
@@ -210,3 +216,122 @@ def test_make_conditional_dispatches_false(fake_model):
     poem = make_poem("a", "b", "c")
     gen(poem, fake_model)
     assert fake_model.last_prefix == "c"  # last was used
+
+
+# ---------------------------------------------------------------------------
+# Utilities: count_syllables, _end_sound
+# ---------------------------------------------------------------------------
+
+def test_count_syllables_basic():
+    assert count_syllables("rain") == 1
+    assert count_syllables("water") == 2
+    assert count_syllables("beautiful") == 3  # beau-ti-ful (heuristic matches)
+
+
+def test_count_syllables_minimum_is_one():
+    # words with no clear vowels still return at least 1
+    assert count_syllables("gym") >= 1
+
+
+def test_count_syllables_multi_word():
+    # counts vowel clusters across the whole string
+    assert count_syllables("the rain falls") == 3
+
+
+def test_end_sound_strips_punctuation():
+    assert _end_sound("streets,") == _end_sound("streets")
+
+
+def test_end_sound_returns_last_n_chars():
+    assert _end_sound("stone", 3) == "one"
+    assert _end_sound("tone", 3) == "one"
+
+
+def test_end_sound_short_word():
+    assert _end_sound("hi", 3) == "hi"
+
+
+# ---------------------------------------------------------------------------
+# Score factories
+# ---------------------------------------------------------------------------
+
+def test_syllable_scorer_exact_match():
+    score = syllable_scorer(3)(None)  # poem arg unused
+    assert score("the rain falls") == 0  # 3 syllables
+
+
+def test_syllable_scorer_distance():
+    score = syllable_scorer(5)(None)
+    # "rain" = 1 syllable → cost = 4
+    assert score("rain") == 4
+
+
+def test_rhyme_scorer_match(fake_model):
+    poem = make_poem("falling rain")
+    score = rhyme_scorer()(poem)
+    # "rain" ends "ain"; "train" also ends "ain" → rhymes
+    assert score("the night train") == 0.0
+    # "door" ends "oor" ≠ "ain" → no rhyme
+    assert score("open door") == 1.0
+
+
+def test_rhyme_scorer_no_prev_line():
+    poem = make_poem()  # empty poem
+    score = rhyme_scorer()(poem)
+    assert score("anything") == 0.0  # no reference → always 0
+
+
+def test_sentiment_scorer_positive():
+    score = sentiment_scorer(1.0)(None)
+    positive = score("I love this wonderful day")
+    negative = score("I hate this terrible day")
+    assert positive < negative  # closer to 1.0 = lower cost
+
+
+def test_sentiment_scorer_negative():
+    score = sentiment_scorer(-1.0)(None)
+    negative = score("I hate this terrible day")
+    neutral = score("the stone sits on the ground")
+    assert negative < neutral  # closer to -1.0 = lower cost
+
+
+# ---------------------------------------------------------------------------
+# make_constrained_generator
+# ---------------------------------------------------------------------------
+
+class SequentialModel:
+    """Returns outputs in order on successive generate() calls."""
+    def __init__(self, outputs: list[str]):
+        self._outputs = outputs
+        self._idx = 0
+
+    def generate(self, prefix: str, max_new_tokens: int = 20) -> str:
+        result = self._outputs[self._idx % len(self._outputs)]
+        self._idx += 1
+        return result
+
+
+def test_constrained_picks_lowest_cost():
+    # syllable_scorer(1) → cost = |syllables - 1|
+    # "hi" has 1 syllable (cost 0), "beautiful" has 4 (cost 3)
+    model = SequentialModel(["beautiful afternoon sky", "hi", "open door"])
+    gen = make_constrained_generator(last_lines(1), syllable_scorer(1), n_candidates=3)
+    poem = make_poem("start")
+    result = gen(poem, model)
+    assert result == "hi"
+
+
+def test_constrained_uses_context_fn():
+    # verify the context fed to the model is what context_fn produces
+    seen_prefixes = []
+
+    class RecordingModel:
+        def generate(self, prefix, max_new_tokens=20):
+            seen_prefixes.append(prefix)
+            return "output"
+
+    gen = make_constrained_generator(last_lines(1), syllable_scorer(3), n_candidates=2)
+    poem = make_poem("the rain falls")
+    gen(poem, RecordingModel())
+    assert all(p == "the rain falls" for p in seen_prefixes)
+    assert len(seen_prefixes) == 2  # n_candidates calls
