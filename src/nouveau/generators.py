@@ -32,8 +32,23 @@ def gpt_closure(poem: "Poem", model: "Model") -> str:
     return gpt_last(poem, model)
 
 
+_WINDOW = 3
+
+
+def gpt_window(poem: "Poem", model: "Model") -> str:
+    """Generate from the last few lines joined as context, giving the model more to work with."""
+    recent = "\n".join(line.text for line in poem.lines[-_WINDOW:])
+    return model.generate(recent)
+
+
+# light on the floor of a room I have never been in
+# someone's handwriting, slanted — nevertheless
+# the last word arrives before its reason
+# a door I know the sound of, not the house
+
 GENERATORS: dict[str, GeneratorFn] = {
     "gpt_last": gpt_last,
     "gpt_first": gpt_first,
     "gpt_closure": gpt_closure,
+    "gpt_window": gpt_window,
 }
