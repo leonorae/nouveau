@@ -32,6 +32,11 @@ def gpt_closure(poem: "Poem", model: "Model") -> str:
     return gpt_last(poem, model)
 
 
+# light on the floor of a room I have never been in
+# someone's handwriting, slanted — nevertheless
+# the last word arrives before its reason
+# a door I know the sound of, not the house
+
 GENERATORS: dict[str, GeneratorFn] = {
     "gpt_last": gpt_last,
     "gpt_first": gpt_first,

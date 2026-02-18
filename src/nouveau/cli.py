@@ -33,7 +33,7 @@ def main(max_lines: int, generator: str, model_name: str, temperature: float) ->
     generator_fn = GENERATORS[generator]
 
     click.echo(f"Loading {model_name}...")
-    model = Model(model_name=model_name)
+    model = Model(model_name=model_name, temperature=temperature)
 
     poem = Poem(max_lines=max_lines, generator_name=generator, model_name=model_name)
 

@@ -9,20 +9,26 @@ DEFAULT_MODEL = "gpt2"
 class Model:
     """Wraps a local HuggingFace GPT-2 model for single-line generation."""
 
-    def __init__(self, model_name: str = DEFAULT_MODEL, checkpoint_path: str | None = None):
+    def __init__(
+        self,
+        model_name: str = DEFAULT_MODEL,
+        checkpoint_path: str | None = None,
+        temperature: float = 0.7,
+    ):
         path = checkpoint_path or model_name
         self.model_name = model_name
+        self.temperature = temperature
         self.tokenizer = GPT2Tokenizer.from_pretrained(path)
         self.llm = GPT2LMHeadModel.from_pretrained(path)
         self.llm.eval()
 
-    def generate(self, prefix: str, max_new_tokens: int = 20, temperature: float = 0.7) -> str:
+    def generate(self, prefix: str, max_new_tokens: int = 20) -> str:
         inputs = self.tokenizer(prefix, return_tensors="pt")
         with torch.no_grad():
             output = self.llm.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
-                temperature=temperature,
+                temperature=self.temperature,
                 do_sample=True,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
