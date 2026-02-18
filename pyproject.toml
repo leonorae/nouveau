@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-nouveau = "nouveau.cli:main"
+nouveau = "nouveau.cli:cli"
 
 [build-system]
 requires = ["hatchling"]
