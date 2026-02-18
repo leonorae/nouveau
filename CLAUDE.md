@@ -4,7 +4,7 @@ Context for AI assistants working on this project.
 
 ## What this project is
 
-**nouveau** is a hobby CLI tool for human-AI collaborative poetry. A user types a line, the model generates the next, alternating until the poem reaches a target length. Finished poems are saved with metadata.
+**nouveau** is a tool for human-AI collaborative poetry. A human or AI agent types some unit of poetry, something else (another model or simple generator) is selected to respond, and on it goes. Finished poems are saved with metadata.
 
 It started as a `gpt_2_simple` prototype and is being refactored into a proper, maintainable Python project. The core concept — including the generator strategy pattern and the `gpt_closure` idea — is worth preserving.
 
@@ -57,11 +57,8 @@ pyproject.toml      # uv project config and dependencies
 
 ## What to be careful about
 
-- The project is a hobby, not a product. Prefer simple, readable solutions over clever ones.
-- Do not add async, web server, or database infrastructure — that's out of scope for now.
-- Do not add API-based model backends. Everything should run locally, offline, for free.
-- The `globals()` trick from the old code is gone — never use it for CLI dispatch.
-- `TextBlob` was in the old code but unused. It is not a dependency of the new code.
+- The project is a hobby, not a product. This is serious business. SRS biznatch
+- Do not add API-based model backends.
 
 ## Development workflow
 
