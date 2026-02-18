@@ -161,45 +161,67 @@ Use `click` for the CLI. It is lightweight, well-documented, and produces good h
 
 ---
 
-## ADR-009: Generator extensibility — factory functions and LineSelector
+## ADR-009: Generator extensibility — two-layer ContextFn/GeneratorFn architecture
 
 **Status:** Decided
 
 **Context:**
-The first four generators (`gpt_last`, `gpt_first`, `gpt_closure`, `gpt_window`) were all plain functions. `gpt_window` hardcoded `_WINDOW = 3` at module level. Any variation — "last 5 lines", "first + last", "every other line" — would require a new copy-paste function. As the generator catalogue grows, this pattern becomes unwieldy.
+The original generators were monolithic functions: selection logic (which lines to use) and model invocation were fused into a single callable. The `gpt_` prefix on every name hardcoded the model backend into the strategy name, which is a category error — the strategies are model-agnostic. `gpt_window` also hardcoded its window size at module level, making any variation require a full copy-paste.
 
 **Decision:**
-Introduce a `make_window_generator(selector: LineSelector) -> GeneratorFn` factory. `LineSelector` is `int | list[int] | slice`, covering:
+Split generation into two composable layers:
 
-- `int` — last N lines (backward-compatible with old `gpt_window`)
-- `list[int]` — arbitrary index picks (e.g. `[0, -1]` for first + last)
-- `slice` — Python slice over `poem.lines` (e.g. `slice(None, None, 2)` for every other)
-
-Pre-configured instances are assigned to module-level names and registered in `GENERATORS`:
-
-```python
-gpt_window      = make_window_generator(3)           # last 3 lines
-gpt_bookend     = make_window_generator([0, -1])     # first + last
-gpt_alternating = make_window_generator(slice(None, None, 2))  # every other
+```
+ContextFn   = (Poem) -> str        # what text to extract from the poem
+GeneratorFn = (Poem, Model) -> str # model call that produces a new line
 ```
 
-**Design principle recorded here:**
-Every generator should be a factory or a factory-produced callable wherever it needs configuration. Plain functions are fine for zero-parameter strategies (`gpt_last`, `gpt_first`). For anything parameterised, use a factory so that the `GENERATORS` dict stays uniform and callers (CLI flags, config files, future composition layers) can tune instances without touching internals.
+`make_generator(context_fn)` bridges the two. `make_conditional(condition, if_true, if_false)` composes generators with state-dependent dispatch.
 
-**Planned generators (not yet implemented — architecture notes in generators.py):**
+Context selectors are factory functions that operate at any granularity:
 
-- `gpt_rhyme` — needs phoneme-based rhyme candidates fed as logit biases or constrained suffixes into `model.generate()`.
-- `gpt_syllable` — needs a syllable counter (pyphen / cmudict) and either a post-processor or a rejection-sampler loop in `model.generate()`.
-- `gpt_sentiment_arc` — needs a lightweight sentiment scorer (vader / textblob) and a `sentiment_target` parameter; re-sample or rank beams until the target is met.
+```python
+# Line-level
+last_lines(n)                   # last n lines
+first_lines(n)                  # first n lines
+line_window(int | list[int] | slice)  # arbitrary line selection
+
+# Word-level
+last_words(n)                   # last n words across all lines
+first_words(n)                  # first n words across all lines
+```
+
+Named instances (registered in `GENERATORS`):
+
+```python
+last        = make_generator(last_lines(1))
+first       = make_generator(first_lines(1))
+window      = make_generator(line_window(3))
+bookend     = make_generator(line_window([0, -1]))
+alternating = make_generator(line_window(slice(None, None, 2)))
+closure     = make_conditional(lambda poem: len(poem) == poem.max_lines - 1,
+                               if_true=first, if_false=last)
+```
+
+The `gpt_` prefix is dropped throughout. Names reflect selection strategy, not backend.
+
+**Design principle:**
+Every generator is either a `make_generator(context_fn)` call or a `make_conditional` composition. New strategies are new `ContextFn` factories — they don't touch the model call path. This keeps the `GENERATORS` dict uniform and allows future callers (CLI flags, config files, composition layers) to parameterise strategies without touching internals.
+
+**Planned generators (not yet registered — architecture notes in generators.py):**
+
+- `rhyme` — `context_fn: last_lines(1)`; needs `model.generate()` to accept `bias_toward` (logit biases or constrained suffix) computed from phoneme candidates via pronouncing/cmudict.
+- `syllable` — any `context_fn`; needs a syllable counter (pyphen/cmudict) and either a post-processing pass or a rejection-sampler loop around `model.generate()`.
+- `sentiment_arc` — any `context_fn`; needs `sentiment_target: float` on `model.generate()`; score candidates with vader/textblob, re-sample or rank beams. Natural arc: neutral → tension → quiet resolution.
 
 **Ruled out:**
-- *Class-based strategy pattern* — still overly formal for functions this simple; factories give the same parameterisation with less ceremony.
-- *Encoding selector as a CLI string* (e.g. `"0,-1"`) — too fragile; keep `LineSelector` as a Python type and expose named presets in `GENERATORS`.
+- *Class-based strategy pattern* — still overly formal; `ContextFn` factories give the same composability with less ceremony.
+- *Encoding selectors as CLI strings* (e.g. `"0,-1"`) — too fragile; `LineSelector` stays a Python type and named presets are exposed in `GENERATORS`.
 
 **Consequences:**
-- `gpt_window` is now a factory-produced callable; its external signature `(poem, model) -> str` is unchanged, so existing tests and CLI invocations are unaffected.
-- Adding a new line-selection strategy is one line: `GENERATORS["gpt_X"] = make_window_generator(...)`.
-- More complex strategies (rhyme, syllable, sentiment) will need `model.py` to grow a richer interface before they can be implemented.
+- All generator names changed (`gpt_last` → `last`, etc.). Existing saved poem JSON files record the old names as metadata strings; the `show` and `list` commands display whatever is stored, so old files remain readable.
+- Adding a word-level generator is a new `ContextFn` factory + one line in `GENERATORS`.
+- More complex strategies (rhyme, syllable, sentiment) require `model.py` to grow a richer interface; the architecture is already shaped to receive them.
 
 ---
 

@@ -1,152 +1,212 @@
 from nouveau.generators import (
-    gpt_alternating,
-    gpt_bookend,
-    gpt_closure,
-    gpt_first,
-    gpt_last,
-    gpt_window,
-    make_window_generator,
+    alternating,
+    bookend,
+    closure,
+    first,
+    first_lines,
+    first_words,
+    last,
+    last_lines,
+    last_words,
+    line_window,
+    make_conditional,
+    make_generator,
+    window,
 )
 from nouveau.poem import Poem
 
 
 def make_poem(*lines, max_lines=10):
-    p = Poem(max_lines=max_lines, generator_name="gpt_last", model_name="fake")
+    p = Poem(max_lines=max_lines, generator_name="last", model_name="fake")
     for i, text in enumerate(lines):
         p.add_line(text, author="human" if i % 2 == 0 else "ai")
     return p
 
 
-def test_gpt_last_uses_final_line(fake_model):
+# ---------------------------------------------------------------------------
+# last / first (single-line selectors)
+# ---------------------------------------------------------------------------
+
+def test_last_uses_final_line(fake_model):
     poem = make_poem("first", "second", "third")
-    gpt_last(poem, fake_model)
+    last(poem, fake_model)
     assert fake_model.last_prefix == "third"
 
 
-def test_gpt_first_uses_first_line(fake_model):
+def test_first_uses_first_line(fake_model):
     poem = make_poem("first", "second", "third")
-    gpt_first(poem, fake_model)
+    first(poem, fake_model)
     assert fake_model.last_prefix == "first"
 
 
-def test_gpt_first_returns_generated(fake_model):
+def test_first_returns_generated(fake_model):
     poem = make_poem("opening")
-    result = gpt_first(poem, fake_model)
+    result = first(poem, fake_model)
     assert result == "[opening]"
 
 
-def test_gpt_last_returns_generated(fake_model):
+def test_last_returns_generated(fake_model):
     poem = make_poem("a", "b", "closing")
-    result = gpt_last(poem, fake_model)
+    result = last(poem, fake_model)
     assert result == "[closing]"
 
 
-def test_gpt_closure_uses_last_when_not_final(fake_model):
+# ---------------------------------------------------------------------------
+# closure (make_conditional)
+# ---------------------------------------------------------------------------
+
+def test_closure_uses_last_when_not_final(fake_model):
     # max_lines=6, poem has 4 lines — not the penultimate position yet
     poem = make_poem("a", "b", "c", "d", max_lines=6)
-    gpt_closure(poem, fake_model)
+    closure(poem, fake_model)
     assert fake_model.last_prefix == "d"
 
 
-def test_gpt_closure_uses_first_on_final_line(fake_model):
+def test_closure_uses_first_on_final_line(fake_model):
     # max_lines=6, poem has 5 lines — the next AI line closes the poem
     poem = make_poem("a", "b", "c", "d", "e", max_lines=6)
-    gpt_closure(poem, fake_model)
+    closure(poem, fake_model)
     assert fake_model.last_prefix == "a"
 
 
-def test_gpt_closure_two_line_poem(fake_model):
+def test_closure_two_line_poem(fake_model):
     # smallest possible: max_lines=2, 1 line in -> closure triggers immediately
     poem = make_poem("only", max_lines=2)
-    gpt_closure(poem, fake_model)
+    closure(poem, fake_model)
     assert fake_model.last_prefix == "only"
 
 
-def test_gpt_window_uses_last_three_lines(fake_model):
+# ---------------------------------------------------------------------------
+# window (line_window int selector)
+# ---------------------------------------------------------------------------
+
+def test_window_uses_last_three_lines(fake_model):
     poem = make_poem("a", "b", "c", "d", "e")
-    gpt_window(poem, fake_model)
+    window(poem, fake_model)
     assert fake_model.last_prefix == "c\nd\ne"
 
 
-def test_gpt_window_fewer_lines_than_window(fake_model):
+def test_window_fewer_lines_than_window(fake_model):
     poem = make_poem("a", "b")
-    gpt_window(poem, fake_model)
+    window(poem, fake_model)
     assert fake_model.last_prefix == "a\nb"
 
 
-def test_gpt_window_single_line(fake_model):
+def test_window_single_line(fake_model):
     poem = make_poem("alone")
-    gpt_window(poem, fake_model)
+    window(poem, fake_model)
     assert fake_model.last_prefix == "alone"
 
 
-def test_gpt_window_returns_generated(fake_model):
+def test_window_returns_generated(fake_model):
     poem = make_poem("x", "y", "z")
-    result = gpt_window(poem, fake_model)
+    result = window(poem, fake_model)
     assert result == "[x\ny\nz]"
 
 
 # ---------------------------------------------------------------------------
-# gpt_bookend
+# bookend (line_window list selector)
 # ---------------------------------------------------------------------------
 
-def test_gpt_bookend_uses_first_and_last(fake_model):
+def test_bookend_uses_first_and_last(fake_model):
     poem = make_poem("alpha", "b", "c", "omega")
-    gpt_bookend(poem, fake_model)
+    bookend(poem, fake_model)
     assert fake_model.last_prefix == "alpha\nomega"
 
 
-def test_gpt_bookend_single_line(fake_model):
+def test_bookend_single_line(fake_model):
     # with one line, index 0 and -1 are the same; deduplication is not required
     poem = make_poem("solo")
-    gpt_bookend(poem, fake_model)
+    bookend(poem, fake_model)
     assert fake_model.last_prefix == "solo\nsolo"
 
 
 # ---------------------------------------------------------------------------
-# gpt_alternating
+# alternating (line_window slice selector)
 # ---------------------------------------------------------------------------
 
-def test_gpt_alternating_even_indexed_lines(fake_model):
+def test_alternating_even_indexed_lines(fake_model):
     poem = make_poem("a", "b", "c", "d", "e")
-    gpt_alternating(poem, fake_model)
+    alternating(poem, fake_model)
     assert fake_model.last_prefix == "a\nc\ne"
 
 
-def test_gpt_alternating_two_lines(fake_model):
+def test_alternating_two_lines(fake_model):
     poem = make_poem("a", "b")
-    gpt_alternating(poem, fake_model)
+    alternating(poem, fake_model)
     assert fake_model.last_prefix == "a"
 
 
 # ---------------------------------------------------------------------------
-# make_window_generator
+# line_window factory
 # ---------------------------------------------------------------------------
 
-def test_make_window_generator_int(fake_model):
-    gen = make_window_generator(2)
+def test_line_window_int(fake_model):
+    gen = make_generator(line_window(2))
     poem = make_poem("a", "b", "c", "d")
     gen(poem, fake_model)
     assert fake_model.last_prefix == "c\nd"
 
 
-def test_make_window_generator_list(fake_model):
-    gen = make_window_generator([0, 2])
+def test_line_window_list(fake_model):
+    gen = make_generator(line_window([0, 2]))
     poem = make_poem("a", "b", "c")
     gen(poem, fake_model)
     assert fake_model.last_prefix == "a\nc"
 
 
-def test_make_window_generator_slice(fake_model):
-    gen = make_window_generator(slice(1, None))
+def test_line_window_slice(fake_model):
+    gen = make_generator(line_window(slice(1, None)))
     poem = make_poem("a", "b", "c")
     gen(poem, fake_model)
     assert fake_model.last_prefix == "b\nc"
 
 
-def test_make_window_generator_out_of_range_indices_skipped(fake_model):
-    # index 5 doesn't exist in a 3-line poem — should be silently skipped
-    gen = make_window_generator([0, 5])
+def test_line_window_out_of_range_indices_skipped(fake_model):
+    gen = make_generator(line_window([0, 5]))
     poem = make_poem("a", "b", "c")
     gen(poem, fake_model)
     assert fake_model.last_prefix == "a"
+
+
+# ---------------------------------------------------------------------------
+# Word-level selectors
+# ---------------------------------------------------------------------------
+
+def test_last_words_spans_lines(fake_model):
+    gen = make_generator(last_words(4))
+    poem = make_poem("the rain falls", "soft on the ground")
+    gen(poem, fake_model)
+    assert fake_model.last_prefix == "soft on the ground"
+
+
+def test_first_words_spans_lines(fake_model):
+    gen = make_generator(first_words(3))
+    poem = make_poem("the rain falls", "on the ground")
+    gen(poem, fake_model)
+    assert fake_model.last_prefix == "the rain falls"
+
+
+def test_last_words_fewer_than_n(fake_model):
+    gen = make_generator(last_words(10))
+    poem = make_poem("just three words")
+    gen(poem, fake_model)
+    assert fake_model.last_prefix == "just three words"
+
+
+# ---------------------------------------------------------------------------
+# make_conditional
+# ---------------------------------------------------------------------------
+
+def test_make_conditional_dispatches_true(fake_model):
+    gen = make_conditional(lambda p: True, first, last)
+    poem = make_poem("a", "b", "c")
+    gen(poem, fake_model)
+    assert fake_model.last_prefix == "a"  # first was used
+
+
+def test_make_conditional_dispatches_false(fake_model):
+    gen = make_conditional(lambda p: False, first, last)
+    poem = make_poem("a", "b", "c")
+    gen(poem, fake_model)
+    assert fake_model.last_prefix == "c"  # last was used

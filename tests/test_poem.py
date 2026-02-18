@@ -6,7 +6,7 @@ from nouveau.poem import Poem
 
 
 def make_poem(**kwargs):
-    defaults = dict(max_lines=4, generator_name="gpt_last", model_name="fake")
+    defaults = dict(max_lines=4, generator_name="last", model_name="fake")
     return Poem(**{**defaults, **kwargs})
 
 
@@ -45,12 +45,12 @@ def test_add_to_full_poem_raises():
 
 
 def test_to_dict_structure():
-    p = make_poem(max_lines=2, generator_name="gpt_closure", model_name="gpt2-finetuned")
+    p = make_poem(max_lines=2, generator_name="closure", model_name="gpt2-finetuned")
     p.add_line("a", author="human")
     p.add_line("b", author="ai")
     d = p.to_dict()
     assert d["schema_version"] == 1
-    assert d["generator"] == "gpt_closure"
+    assert d["generator"] == "closure"
     assert d["model"] == "gpt2-finetuned"
     assert d["lines"] == [
         {"author": "human", "text": "a"},
@@ -83,11 +83,11 @@ def test_save_creates_json_file(tmp_path, monkeypatch):
 
 def test_save_content_roundtrip(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    p = make_poem(max_lines=2, generator_name="gpt_window")
+    p = make_poem(max_lines=2, generator_name="window")
     p.add_line("first line", author="human")
     p.add_line("second line", author="ai")
     path = p.save()
     data = json.loads(path.read_text())
-    assert data["generator"] == "gpt_window"
+    assert data["generator"] == "window"
     assert data["lines"][0]["text"] == "first line"
     assert data["lines"][1]["text"] == "second line"

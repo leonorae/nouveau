@@ -1,15 +1,19 @@
 """
 Generator strategies for poem line generation.
 
-Each generator is a callable with signature (poem: Poem, model: Model) -> str.
-Register new generators in GENERATORS to make them available in the CLI.
+Two-layer architecture:
+  ContextFn   = (Poem) -> str
+                Extracts a prompt from the poem. Pure selection, no model call.
+                Operates at any granularity: line, word, token.
 
-Design principle: prefer factory functions over plain functions wherever a
-generator needs configuration. A factory accepts parameters and returns a
-GeneratorFn — this keeps the GENERATORS dict uniform while allowing per-instance
-tuning. Every generator added here should follow this pattern so that future
-callers (CLI flags, config files, composition layers) can parameterise them
-without touching generator internals.
+  GeneratorFn = (Poem, Model) -> str
+                Calls the model with a context prompt and returns a new line.
+
+make_generator(context_fn) bridges the two layers.
+make_conditional(condition, if_true, if_false) composes generators.
+
+Every generator in GENERATORS is a GeneratorFn. Strategies are model-agnostic;
+names reflect selection logic, not the backend.
 """
 from __future__ import annotations
 
@@ -19,110 +23,130 @@ if TYPE_CHECKING:
     from nouveau.model import Model
     from nouveau.poem import Poem
 
+ContextFn = Callable[["Poem"], str]
 GeneratorFn = Callable[["Poem", "Model"], str]
 LineSelector = Union[int, list[int], slice]
 
 
 # ---------------------------------------------------------------------------
-# Primitive helpers
+# Core combinators
 # ---------------------------------------------------------------------------
 
-def _select_lines(poem: "Poem", selector: LineSelector) -> list:
-    """Return a subset of poem lines according to selector.
+def make_generator(context_fn: ContextFn) -> GeneratorFn:
+    """Wrap a context selector into a full generator callable."""
+    def _generator(poem: "Poem", model: "Model") -> str:
+        return model.generate(context_fn(poem))
+    return _generator
 
-    - int       → last N lines
-    - slice     → poem.lines[selector]
-    - list[int] → poem.lines[i] for each i (skips out-of-range indices)
-    """
+
+def make_conditional(
+    condition: Callable[["Poem"], bool],
+    if_true: GeneratorFn,
+    if_false: GeneratorFn,
+) -> GeneratorFn:
+    """Return a generator that dispatches to if_true or if_false based on poem state."""
+    def _generator(poem: "Poem", model: "Model") -> str:
+        return (if_true if condition(poem) else if_false)(poem, model)
+    return _generator
+
+
+# ---------------------------------------------------------------------------
+# Line-level context selectors
+# ---------------------------------------------------------------------------
+
+def last_lines(n: int = 1) -> ContextFn:
+    """Select the last n lines of the poem."""
+    return lambda poem: "\n".join(line.text for line in poem.lines[-n:])
+
+
+def first_lines(n: int = 1) -> ContextFn:
+    """Select the first n lines of the poem."""
+    return lambda poem: "\n".join(line.text for line in poem.lines[:n])
+
+
+def _resolve_line_selector(poem: "Poem", selector: LineSelector) -> list:
     if isinstance(selector, int):
         return poem.lines[-selector:]
     if isinstance(selector, slice):
         return poem.lines[selector]
-    # list of indices
     n = len(poem.lines)
     return [poem.lines[i] for i in selector if -n <= i < n]
 
 
+def line_window(selector: LineSelector = 3) -> ContextFn:
+    """Select lines by int (last N), list of indices, or slice."""
+    def _selector(poem: "Poem") -> str:
+        lines = _resolve_line_selector(poem, selector)
+        return "\n".join(line.text for line in lines)
+    return _selector
+
+
 # ---------------------------------------------------------------------------
-# Factory functions
+# Word-level context selectors
 # ---------------------------------------------------------------------------
 
-def make_window_generator(selector: LineSelector = 3) -> GeneratorFn:
-    """Return a generator that prompts the model with lines chosen by *selector*.
+def last_words(n: int) -> ContextFn:
+    """Select the last n words across all lines."""
+    def _selector(poem: "Poem") -> str:
+        words = " ".join(line.text for line in poem.lines).split()
+        return " ".join(words[-n:])
+    return _selector
 
-    selector:
-      int        – last N lines (default 3, backward-compatible with gpt_window)
-      list[int]  – specific indices, e.g. [0, -1] for first + last
-      slice      – arbitrary slice, e.g. slice(None, None, 2) for every other line
-    """
-    def _generator(poem: "Poem", model: "Model") -> str:
-        lines = _select_lines(poem, selector)
-        context = "\n".join(line.text for line in lines)
-        return model.generate(context)
-    return _generator
+
+def first_words(n: int) -> ContextFn:
+    """Select the first n words across all lines."""
+    def _selector(poem: "Poem") -> str:
+        words = " ".join(line.text for line in poem.lines).split()
+        return " ".join(words[:n])
+    return _selector
 
 
 # ---------------------------------------------------------------------------
 # Named generator instances
 # ---------------------------------------------------------------------------
 
-def gpt_last(poem: "Poem", model: "Model") -> str:
-    """Generate based on the most recent line."""
-    return model.generate(poem[-1])
+last        = make_generator(last_lines(1))
+first       = make_generator(first_lines(1))
+window      = make_generator(line_window(3))
+bookend     = make_generator(line_window([0, -1]))
+alternating = make_generator(line_window(slice(None, None, 2)))
 
-
-def gpt_first(poem: "Poem", model: "Model") -> str:
-    """Generate based on the very first line of the poem."""
-    return model.generate(poem[0])
-
-
-def gpt_closure(poem: "Poem", model: "Model") -> str:
-    """Like gpt_last, but uses gpt_first for the final line to close the poem."""
-    if len(poem) == poem.max_lines - 1:
-        return gpt_first(poem, model)
-    return gpt_last(poem, model)
-
-
-# last 3 lines — backward-compatible default
-gpt_window = make_window_generator(3)
-
-# first + last line — orients the closing line toward the opening image
-gpt_bookend = make_window_generator([0, -1])
-
-# every other line — biases toward a single voice (human or AI, depending on parity)
-gpt_alternating = make_window_generator(slice(None, None, 2))
+# closure: on the penultimate turn, reach back to the opening line to close the poem
+closure = make_conditional(
+    condition=lambda poem: len(poem) == poem.max_lines - 1,
+    if_true=first,
+    if_false=last,
+)
 
 
 # ---------------------------------------------------------------------------
 # Future generators (stubs — not yet registered)
 # ---------------------------------------------------------------------------
-# These require capabilities not yet in model.py. Architecture notes below.
+# Architecture notes for generators requiring model.py extensions:
 #
-# gpt_rhyme:
-#   Architecture: model.generate() needs a `bias_toward` argument accepting
-#   a list of candidate word suffixes. Pre-compute rhyme candidates from the
-#   previous AI line using a phoneme dict (pronouncing / cmudict), then pass
-#   them as soft logit biases or append them as a constrained prompt suffix.
+# rhyme:
+#   context_fn: last_lines(1) or last_words(n)
+#   Extra: model.generate() needs `bias_toward` accepting rhyme candidates.
+#   Compute candidates via pronouncing/cmudict from the previous AI line,
+#   pass as logit biases or a constrained prompt suffix.
 #
-# gpt_syllable:
-#   Architecture: post-process the token stream, trimming or extending output
-#   to hit a target syllable count. Needs a syllable counter (pyphen / cmudict).
-#   Alternatively, wrap model.generate() in a rejection-sampler loop that
-#   re-samples until the count is within tolerance.
+# syllable:
+#   context_fn: any selector
+#   Extra: post-process token stream to hit a target syllable count (pyphen/cmudict),
+#   or wrap model.generate() in a rejection-sampler loop.
 #
-# gpt_sentiment_arc:
-#   Architecture: add a `sentiment_target: float` param to model.generate().
-#   Score each candidate line with a lightweight model (vader / textblob),
-#   re-sample until the score falls within tolerance, or use it as a ranking
-#   signal over beam candidates. Natural arc: open neutral → build tension →
-#   resolve quietly.
+# sentiment_arc:
+#   context_fn: any selector
+#   Extra: `sentiment_target: float` on model.generate(). Score candidates with
+#   vader/textblob; re-sample until within tolerance or rank beam candidates.
+#   Natural arc: neutral → tension → quiet resolution.
 
 
 GENERATORS: dict[str, GeneratorFn] = {
-    "gpt_last": gpt_last,
-    "gpt_first": gpt_first,
-    "gpt_closure": gpt_closure,
-    "gpt_window": gpt_window,
-    "gpt_bookend": gpt_bookend,
-    "gpt_alternating": gpt_alternating,
+    "last":        last,
+    "first":       first,
+    "window":      window,
+    "bookend":     bookend,
+    "alternating": alternating,
+    "closure":     closure,
 }
