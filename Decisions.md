@@ -158,3 +158,21 @@ Use `click` for the CLI. It is lightweight, well-documented, and produces good h
 **Consequences:**
 - `click` is a dependency (small and stable).
 - The CLI gains `--help`, proper error messages, and type validation for free.
+
+---
+
+## ADR-008: Deferred technology notes
+
+**Status:** Parked — not a current decision, recorded so the ideas aren't lost.
+
+### Candle (HuggingFace Rust inference)
+
+[Candle](https://github.com/huggingface/candle) is HuggingFace's pure-Rust ML inference framework. No Python runtime, no multi-GB `torch` install, fast binaries, CUDA/Metal support, loads the same HF weights. Fine-tuning support is thin and the ecosystem is small compared to Python `transformers`, but it's the right answer if we ever want a self-contained binary or need to shed the torch dependency. Worth revisiting if CPU inference becomes a bottleneck or deployment simplicity matters.
+
+Ruled out for now: we're fine-tuning locally, training tooling is Python-first, and adding a Rust build step is not worth it at this stage.
+
+### Lisp as a composition layer
+
+The generator strategy pattern and the constraint/sampling pipeline are naturally functional in character. A Lisp or ML-family language (OCaml, Clojure, etc.) would express composable constraint stacks and higher-order generator strategies more elegantly than Python. The idea isn't dismissed — there may be a place for a small Lisp-shaped DSL at the composition layer if the agent-interaction surface grows complex enough to warrant it.
+
+Ruled out for now: agents are the primary surface interacting with this code, and Python maximizes agent legibility and modifiability. Starting with a Lisp layer adds friction before the composition model is even settled.
