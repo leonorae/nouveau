@@ -1,4 +1,12 @@
-from nouveau.generators import gpt_closure, gpt_first, gpt_last, gpt_window
+from nouveau.generators import (
+    gpt_alternating,
+    gpt_bookend,
+    gpt_closure,
+    gpt_first,
+    gpt_last,
+    gpt_window,
+    make_window_generator,
+)
 from nouveau.poem import Poem
 
 
@@ -76,3 +84,69 @@ def test_gpt_window_returns_generated(fake_model):
     poem = make_poem("x", "y", "z")
     result = gpt_window(poem, fake_model)
     assert result == "[x\ny\nz]"
+
+
+# ---------------------------------------------------------------------------
+# gpt_bookend
+# ---------------------------------------------------------------------------
+
+def test_gpt_bookend_uses_first_and_last(fake_model):
+    poem = make_poem("alpha", "b", "c", "omega")
+    gpt_bookend(poem, fake_model)
+    assert fake_model.last_prefix == "alpha\nomega"
+
+
+def test_gpt_bookend_single_line(fake_model):
+    # with one line, index 0 and -1 are the same; deduplication is not required
+    poem = make_poem("solo")
+    gpt_bookend(poem, fake_model)
+    assert fake_model.last_prefix == "solo\nsolo"
+
+
+# ---------------------------------------------------------------------------
+# gpt_alternating
+# ---------------------------------------------------------------------------
+
+def test_gpt_alternating_even_indexed_lines(fake_model):
+    poem = make_poem("a", "b", "c", "d", "e")
+    gpt_alternating(poem, fake_model)
+    assert fake_model.last_prefix == "a\nc\ne"
+
+
+def test_gpt_alternating_two_lines(fake_model):
+    poem = make_poem("a", "b")
+    gpt_alternating(poem, fake_model)
+    assert fake_model.last_prefix == "a"
+
+
+# ---------------------------------------------------------------------------
+# make_window_generator
+# ---------------------------------------------------------------------------
+
+def test_make_window_generator_int(fake_model):
+    gen = make_window_generator(2)
+    poem = make_poem("a", "b", "c", "d")
+    gen(poem, fake_model)
+    assert fake_model.last_prefix == "c\nd"
+
+
+def test_make_window_generator_list(fake_model):
+    gen = make_window_generator([0, 2])
+    poem = make_poem("a", "b", "c")
+    gen(poem, fake_model)
+    assert fake_model.last_prefix == "a\nc"
+
+
+def test_make_window_generator_slice(fake_model):
+    gen = make_window_generator(slice(1, None))
+    poem = make_poem("a", "b", "c")
+    gen(poem, fake_model)
+    assert fake_model.last_prefix == "b\nc"
+
+
+def test_make_window_generator_out_of_range_indices_skipped(fake_model):
+    # index 5 doesn't exist in a 3-line poem — should be silently skipped
+    gen = make_window_generator([0, 5])
+    poem = make_poem("a", "b", "c")
+    gen(poem, fake_model)
+    assert fake_model.last_prefix == "a"

@@ -161,6 +161,48 @@ Use `click` for the CLI. It is lightweight, well-documented, and produces good h
 
 ---
 
+## ADR-009: Generator extensibility — factory functions and LineSelector
+
+**Status:** Decided
+
+**Context:**
+The first four generators (`gpt_last`, `gpt_first`, `gpt_closure`, `gpt_window`) were all plain functions. `gpt_window` hardcoded `_WINDOW = 3` at module level. Any variation — "last 5 lines", "first + last", "every other line" — would require a new copy-paste function. As the generator catalogue grows, this pattern becomes unwieldy.
+
+**Decision:**
+Introduce a `make_window_generator(selector: LineSelector) -> GeneratorFn` factory. `LineSelector` is `int | list[int] | slice`, covering:
+
+- `int` — last N lines (backward-compatible with old `gpt_window`)
+- `list[int]` — arbitrary index picks (e.g. `[0, -1]` for first + last)
+- `slice` — Python slice over `poem.lines` (e.g. `slice(None, None, 2)` for every other)
+
+Pre-configured instances are assigned to module-level names and registered in `GENERATORS`:
+
+```python
+gpt_window      = make_window_generator(3)           # last 3 lines
+gpt_bookend     = make_window_generator([0, -1])     # first + last
+gpt_alternating = make_window_generator(slice(None, None, 2))  # every other
+```
+
+**Design principle recorded here:**
+Every generator should be a factory or a factory-produced callable wherever it needs configuration. Plain functions are fine for zero-parameter strategies (`gpt_last`, `gpt_first`). For anything parameterised, use a factory so that the `GENERATORS` dict stays uniform and callers (CLI flags, config files, future composition layers) can tune instances without touching internals.
+
+**Planned generators (not yet implemented — architecture notes in generators.py):**
+
+- `gpt_rhyme` — needs phoneme-based rhyme candidates fed as logit biases or constrained suffixes into `model.generate()`.
+- `gpt_syllable` — needs a syllable counter (pyphen / cmudict) and either a post-processor or a rejection-sampler loop in `model.generate()`.
+- `gpt_sentiment_arc` — needs a lightweight sentiment scorer (vader / textblob) and a `sentiment_target` parameter; re-sample or rank beams until the target is met.
+
+**Ruled out:**
+- *Class-based strategy pattern* — still overly formal for functions this simple; factories give the same parameterisation with less ceremony.
+- *Encoding selector as a CLI string* (e.g. `"0,-1"`) — too fragile; keep `LineSelector` as a Python type and expose named presets in `GENERATORS`.
+
+**Consequences:**
+- `gpt_window` is now a factory-produced callable; its external signature `(poem, model) -> str` is unchanged, so existing tests and CLI invocations are unaffected.
+- Adding a new line-selection strategy is one line: `GENERATORS["gpt_X"] = make_window_generator(...)`.
+- More complex strategies (rhyme, syllable, sentiment) will need `model.py` to grow a richer interface before they can be implemented.
+
+---
+
 ## ADR-008: Deferred technology notes
 
 **Status:** Parked — not a current decision, recorded so the ideas aren't lost.
