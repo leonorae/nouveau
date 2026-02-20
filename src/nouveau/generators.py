@@ -57,16 +57,21 @@ def make_constrained_generator(
     context_fn: ContextFn,
     make_score: ScoreFactory,
     n_candidates: int = 8,
+    max_new_tokens: int = 20,
 ) -> GeneratorFn:
     """Generate n_candidates outputs and return the one with the lowest score.
 
     make_score(poem) is called once per turn and returns a cost function
     (str) -> float over candidate strings (lower = better fit).
+
+    max_new_tokens is forwarded to model.generate() — reduce it for
+    length-constrained generators (e.g. haiku lines).
     """
     def _generator(poem: "Poem", model: "Model") -> str:
         context = context_fn(poem)
         score = make_score(poem)
-        candidates = [model.generate(context) for _ in range(n_candidates)]
+        candidates = [model.generate(context, max_new_tokens=max_new_tokens)
+                      for _ in range(n_candidates)]
         return min(candidates, key=score)
     return _generator
 
@@ -221,8 +226,9 @@ closure = make_conditional(
 )
 
 # constrained: pick the best of n_candidates by the given cost function
-haiku_5 = make_constrained_generator(last_lines(1), syllable_scorer(5))
-haiku_7 = make_constrained_generator(last_lines(1), syllable_scorer(7))
+# haiku lines are short — cap token budget so candidates are plausibly the right length
+haiku_5 = make_constrained_generator(last_lines(1), syllable_scorer(5), max_new_tokens=8)
+haiku_7 = make_constrained_generator(last_lines(1), syllable_scorer(7), max_new_tokens=12)
 rhyme   = make_constrained_generator(last_lines(1), rhyme_scorer())
 hopeful = make_constrained_generator(last_lines(1), sentiment_scorer(0.6))
 somber  = make_constrained_generator(last_lines(1), sentiment_scorer(-0.6))
