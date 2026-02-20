@@ -227,8 +227,8 @@ closure = make_conditional(
 
 # constrained: pick the best of n_candidates by the given cost function
 # haiku lines are short — cap token budget so candidates are plausibly the right length
-haiku_5 = make_constrained_generator(last_lines(1), syllable_scorer(5), max_new_tokens=8)
-haiku_7 = make_constrained_generator(last_lines(1), syllable_scorer(7), max_new_tokens=12)
+syllables_5 = make_constrained_generator(last_lines(1), syllable_scorer(5), max_new_tokens=8)
+syllables_7 = make_constrained_generator(last_lines(1), syllable_scorer(7), max_new_tokens=12)
 rhyme   = make_constrained_generator(last_lines(1), rhyme_scorer())
 hopeful = make_constrained_generator(last_lines(1), sentiment_scorer(0.6))
 somber  = make_constrained_generator(last_lines(1), sentiment_scorer(-0.6))
@@ -241,8 +241,8 @@ GENERATORS: dict[str, GeneratorFn] = {
     "bookend":     bookend,
     "alternating": alternating,
     "closure":     closure,
-    "haiku_5":     haiku_5,
-    "haiku_7":     haiku_7,
+    "syllables_5": syllables_5,
+    "syllables_7": syllables_7,
     "rhyme":       rhyme,
     "hopeful":     hopeful,
     "somber":      somber,

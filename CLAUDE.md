@@ -4,73 +4,102 @@ Context for AI assistants working on this project.
 
 ## What this project is
 
-**nouveau** is a hobby CLI tool for human-AI collaborative poetry. A user types a line, the model generates the next, alternating until the poem reaches a target length. Finished poems are saved with metadata.
+**nouveau** is a collaborative poetry environment. The current form is a CLI where a human types a line and an AI generates the next, alternating until the poem reaches a target length. Finished poems are saved with metadata.
 
-It started as a `gpt_2_simple` prototype and is being refactored into a proper, maintainable Python project. The core concept — including the generator strategy pattern and the `gpt_closure` idea — is worth preserving.
+The direction it's heading: LLMs as first-class participants — not just backends, but poets, directors, and trainers. Humans can direct LLMs, LLMs can direct other LLMs, and poem sessions can feed back into model weights via RL. The codebase itself is fair game for AI collaborators to read, extend, and edit. Recursive and experimental is fine here.
 
-## Current state
+The refactor from a `gpt_2_simple` prototype is complete. The architecture is stable.
 
-The project is mid-refactor. The old prototype files (`poetry.py`, `data.py`) represent the original behavior. New code will go in `src/nouveau/`. Do not treat the old files as the source of truth for architecture — treat `Decisions.md` and this file as the source of truth.
-
-## Architecture overview
+## Architecture
 
 ```
 src/nouveau/
     cli.py          # Click-based CLI entry point
     poem.py         # Poem data model and storage
-    generators.py   # Generator strategy functions + registry
-    model.py        # Model loading and inference abstraction
+    generators.py   # Generator strategies, combinators, score factories, registry
+    model.py        # Model loading and inference (GPT-2 via transformers)
 data/
     prepare.py      # Dataset prep (Gutenberg Poetry Corpus)
-train.py            # Fine-tuning script (transformers Trainer)
-poems/              # Output directory, gitignored
-pyproject.toml      # uv project config and dependencies
+train.py            # Fine-tuning script (transformers Trainer API)
+poems/              # Saved poems, gitignored
+pyproject.toml      # uv project config
 ```
 
-## Key conventions
+## Generator architecture
 
-### Model
-- Backend is Hugging Face `transformers`. Default model is `gpt2` (124M params, runs on CPU).
-- Model loading lives in `model.py` and is abstracted behind a simple interface so the model can be swapped via config without touching generator logic.
-- Fine-tuning is done locally via `train.py`, not in an external notebook.
+`generators.py` has three layers:
 
-### Generators
-- Generator strategies are plain functions with the signature `(poem: Poem) -> str`.
-- They are registered in a dict (`GENERATORS`) in `generators.py`, not resolved via `globals()`.
-- New generators should be added to that dict — the CLI reads from it.
+```
+ContextFn    = (Poem) -> str              # selects text from the poem
+GeneratorFn  = (Poem, Model) -> str       # calls the model, returns a line
+ScoreFactory = (Poem) -> (str) -> float   # cost function for rejection sampling
+```
 
-### Poem storage
-- Poems are saved as `.json` files in `./poems/`.
-- Each file has a metadata header and a `lines` list where each entry is `{"author": "human"|"ai", "text": "..."}`.
-- This format is designed to extend cleanly to multi-agent scenarios.
-- See `poem.py` for the schema.
+**Combinators:**
+- `make_generator(context_fn)` — bridges ContextFn → GeneratorFn
+- `make_conditional(condition, if_true, if_false)` — state-dependent dispatch
+- `make_constrained_generator(context_fn, make_score, n_candidates, max_new_tokens)` — generates N candidates, returns the one with lowest cost
 
-### CLI
-- Entry point is `nouveau` (via `pyproject.toml` script).
-- `Click` is used for argument parsing.
-- Keep the CLI simple. TUI (e.g. `rich`/`textual`) is on the roadmap but not now.
+**Context selectors** (factory functions, any granularity):
+- Line: `last_lines(n)`, `first_lines(n)`, `line_window(int|list[int]|slice)`
+- Word: `last_words(n)`, `first_words(n)`
 
-### Packaging
-- `uv` is the package manager. Use `uv add` to add dependencies, not `pip install`.
-- `uv run nouveau` to run the CLI during development.
-- `uv run python train.py` for fine-tuning.
+**Score factories** (pluggable reward functions — same interface RL will use):
+- `syllable_scorer(target)` — distance from target syllable count
+- `rhyme_scorer(n_chars)` — end-sound match with previous line
+- `sentiment_scorer(target)` — VADER compound distance from target
 
-## What to be careful about
+Named instances are registered in `GENERATORS`. The CLI reads from it; `click.Choice` is generated dynamically. Adding a generator is one line in that dict.
 
-- The project is a hobby, not a product. Prefer simple, readable solutions over clever ones.
-- Do not add async, web server, or database infrastructure — that's out of scope for now.
-- Do not add API-based model backends. Everything should run locally, offline, for free.
-- The `globals()` trick from the old code is gone — never use it for CLI dispatch.
-- `TextBlob` was in the old code but unused. It is not a dependency of the new code.
+The score factories are already reward functions. The path from `make_constrained_generator` (inference-time rejection sampling) to GRPO (training-time group scoring with gradient updates) is short — they're the same operation, one updates weights and one doesn't.
+
+## Model
+
+- Backend: HuggingFace `transformers`, default `gpt2` (124M, CPU-friendly).
+- Interface: `Model(model_name, temperature).generate(prefix, max_new_tokens)`.
+- Swappable via CLI `--model` flag without touching generator logic.
+- Fine-tuning: `train.py` using the Trainer API on the Gutenberg Poetry Corpus.
+- Everything runs locally, offline, for free.
+
+## Poem storage
+
+JSON files in `./poems/`. Schema:
+```json
+{
+  "schema_version": 1,
+  "created_at": "...",
+  "model": "gpt2",
+  "generator": "last",
+  "lines": [
+    {"author": "human", "text": "..."},
+    {"author": "ai",    "text": "..."}
+  ]
+}
+```
+`author` is `"human"` or `"ai"` now, but the field is designed to hold agent names for multi-agent scenarios.
+
+## What's next
+
+- **RL training loop** (`train_rl.py`): score factories → reward functions, GRPO via `trl`. Poem sessions log accepted/rejected lines; periodic updates personalise the model to the collaborator's aesthetic.
+- **Multi-agent composition**: multiple `Model` + `GeneratorFn` pairs taking turns, with a director (human or LLM) choosing which voice speaks next.
+- **Scoring improvements**: the current heuristics (vowel-cluster syllables, last-N-chars rhyme) are rough. `pronouncing`/cmudict for phonemes, `pyphen` for syllables are the next step up without heavy deps.
+
+## Constraints
+
+- No web server, no database, no async infrastructure — not now.
+- No API-based model backends. Local and offline.
+- `uv` for packaging. `uv add` to add deps, not `pip install`.
+- Prefer simple and readable. This is experimental, not a product.
 
 ## Development workflow
 
 ```bash
-uv sync                  # install dependencies
-uv run nouveau 10 gpt_last   # run the CLI
-uv run python train.py   # fine-tune the model
-uv run pytest            # run tests (when they exist)
+uv sync                          # install dependencies
+uv run nouveau compose 10 last   # run the CLI
+uv run python train.py           # fine-tune the model
+uv run pytest                    # run tests
 ```
 
 ## Branch
+
 Active development branch: `claude/review-repository-k33Uw`
