@@ -36,6 +36,30 @@ def test_compose_invalid_generator():
     assert result.exit_code != 0
 
 
+def test_compose_parameterized_generator(fake_model, tmp_path):
+    runner = CliRunner()
+    with patch("nouveau.cli.Model", return_value=fake_model):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(
+                cli,
+                ["compose", "2", "syllables:5"],
+                input="hello\n",
+            )
+    assert result.exit_code == 0, result.output
+
+
+def test_compose_invalid_factory_arg():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["compose", "4", "syllables:notanumber"])
+    assert result.exit_code != 0
+
+
+def test_compose_unknown_factory():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["compose", "4", "unknown:5"])
+    assert result.exit_code != 0
+
+
 def test_compose_full_run(fake_model, tmp_path):
     runner = CliRunner()
     with patch("nouveau.cli.Model", return_value=fake_model):

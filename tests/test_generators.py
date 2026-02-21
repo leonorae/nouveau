@@ -3,6 +3,7 @@ from nouveau.generators import (
     alternating,
     bookend,
     closure,
+    combine_scores,
     count_syllables,
     first,
     first_lines,
@@ -319,6 +320,41 @@ def test_constrained_picks_lowest_cost():
     poem = make_poem("start")
     result = gen(poem, model)
     assert result == "hi"
+
+
+# ---------------------------------------------------------------------------
+# combine_scores
+# ---------------------------------------------------------------------------
+
+def test_combine_scores_sums_costs():
+    # syllable_scorer(3) + syllable_scorer(1) with equal weights
+    combined = combine_scores(syllable_scorer(3), syllable_scorer(1))
+    score = combined(None)
+    # "rain" = 1 syllable: |1-3| + |1-1| = 2 + 0 = 2
+    assert score("rain") == 2.0
+    # "the rain falls" = 3 syllables: |3-3| + |3-1| = 0 + 2 = 2
+    assert score("the rain falls") == 2.0
+
+
+def test_combine_scores_respects_weights():
+    combined = combine_scores(syllable_scorer(5), syllable_scorer(1), weights=[2.0, 1.0])
+    score = combined(None)
+    # "rain" = 1 syllable: (|1-5| * 2) + (|1-1| * 1) = 8 + 0 = 8
+    assert score("rain") == 8.0
+
+
+def test_combine_scores_selects_best_candidate():
+    # want 3 syllables AND rhyme with "rain"
+    model = SequentialModel([
+        "the night train",       # "ain" rhymes, 3 syllables → low cost
+        "beautiful afternoon sky",  # no rhyme, 5 syllables → high cost
+        "plain",                 # rhymes, 1 syllable → medium cost
+    ])
+    combined = combine_scores(syllable_scorer(3), rhyme_scorer())
+    gen = make_constrained_generator(last_lines(1), combined, n_candidates=3)
+    poem = make_poem("falling rain")
+    result = gen(poem, model)
+    assert result == "the night train"
 
 
 def test_constrained_uses_context_fn():

@@ -168,6 +168,25 @@ def _get_sentiment_analyzer():
     return _sentiment_analyzer
 
 
+def combine_scores(
+    *factories: ScoreFactory,
+    weights: list[float] | None = None,
+) -> ScoreFactory:
+    """Combine multiple score factories by weighted sum (all costs lower = better).
+
+    Example:
+        make_constrained_generator(
+            last_lines(1),
+            combine_scores(syllable_scorer(7), rhyme_scorer()),
+        )
+    """
+    def make_score(poem: "Poem") -> Callable[[str], float]:
+        scorers = [f(poem) for f in factories]
+        ws = weights if weights is not None else [1.0] * len(factories)
+        return lambda text: sum(s(text) * w for s, w in zip(scorers, ws))
+    return make_score
+
+
 # ---------------------------------------------------------------------------
 # Score factories
 # ---------------------------------------------------------------------------
@@ -225,15 +244,13 @@ closure = make_conditional(
     if_false=last,
 )
 
-# constrained: pick the best of n_candidates by the given cost function
-# haiku lines are short — cap token budget so candidates are plausibly the right length
-syllables_5 = make_constrained_generator(last_lines(1), syllable_scorer(5), max_new_tokens=8)
-syllables_7 = make_constrained_generator(last_lines(1), syllable_scorer(7), max_new_tokens=12)
+# constrained named defaults — use GENERATOR_FACTORIES for parameterized variants
 rhyme   = make_constrained_generator(last_lines(1), rhyme_scorer())
 hopeful = make_constrained_generator(last_lines(1), sentiment_scorer(0.6))
 somber  = make_constrained_generator(last_lines(1), sentiment_scorer(-0.6))
 
 
+# Zero-arg generators registered for the CLI.
 GENERATORS: dict[str, GeneratorFn] = {
     "last":        last,
     "first":       first,
@@ -241,9 +258,25 @@ GENERATORS: dict[str, GeneratorFn] = {
     "bookend":     bookend,
     "alternating": alternating,
     "closure":     closure,
-    "syllables_5": syllables_5,
-    "syllables_7": syllables_7,
     "rhyme":       rhyme,
     "hopeful":     hopeful,
     "somber":      somber,
+}
+
+# Parameterized factories: CLI calls these as  name:arg  (e.g. syllables:5).
+# Each value is a callable (str) -> GeneratorFn that parses its own argument.
+GENERATOR_FACTORIES: dict[str, Callable[[str], GeneratorFn]] = {
+    "syllables": lambda arg: make_constrained_generator(
+        last_lines(1),
+        syllable_scorer(int(arg)),
+        max_new_tokens=max(8, int(arg) * 2),
+    ),
+    "rhyme": lambda arg: make_constrained_generator(
+        last_lines(1),
+        rhyme_scorer(int(arg)),
+    ),
+    "sentiment": lambda arg: make_constrained_generator(
+        last_lines(1),
+        sentiment_scorer(float(arg)),
+    ),
 }
