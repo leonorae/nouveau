@@ -18,7 +18,9 @@ names reflect selection and constraint logic, not the backend.
 """
 from __future__ import annotations
 
+import random
 import re
+from collections import defaultdict
 from typing import TYPE_CHECKING, Callable, Union
 
 if TYPE_CHECKING:
@@ -124,6 +126,178 @@ def first_words(n: int) -> ContextFn:
     def _selector(poem: "Poem") -> str:
         words = " ".join(line.text for line in poem.lines).split()
         return " ".join(words[:n])
+    return _selector
+
+
+# ---------------------------------------------------------------------------
+# Context transformers — ContextFn -> ContextFn
+#
+# These compose with any context selector to transform text before the model
+# sees it. Inspired by Oulipo constraints, Burroughs cut-up, and erasure poetry.
+# ---------------------------------------------------------------------------
+
+def cut_up(context_fn: ContextFn, seed: int | None = None) -> ContextFn:
+    """Burroughs cut-up: shuffle words from the context into new order.
+
+    The model receives a rearranged version of the selected text,
+    producing output that diverges from the original while staying
+    in the same semantic field.
+    """
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        words = text.split()
+        rng = random.Random(seed if seed is not None else len(poem))
+        rng.shuffle(words)
+        return " ".join(words)
+    return _selector
+
+
+def fold_in(fn_a: ContextFn, fn_b: ContextFn) -> ContextFn:
+    """Burroughs fold-in: interleave words from two context sources.
+
+    Takes alternating words from each source, producing a composite
+    text that carries traces of both originals.
+    """
+    def _selector(poem: "Poem") -> str:
+        words_a = fn_a(poem).split()
+        words_b = fn_b(poem).split()
+        result = []
+        for i in range(max(len(words_a), len(words_b))):
+            if i < len(words_a):
+                result.append(words_a[i])
+            if i < len(words_b):
+                result.append(words_b[i])
+        return " ".join(result)
+    return _selector
+
+
+def erasure(context_fn: ContextFn, keep_ratio: float = 0.5,
+            seed: int | None = None) -> ContextFn:
+    """Erasure poetry: randomly remove words, leaving gaps.
+
+    keep_ratio controls density — 0.3 is sparse, 0.7 is dense.
+    Gaps are marked with '...' to preserve the sense of absence.
+    """
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        words = text.split()
+        if not words:
+            return text
+        rng = random.Random(seed if seed is not None else len(poem))
+        kept = [w if rng.random() < keep_ratio else "..." for w in words]
+        # collapse consecutive gaps
+        result = []
+        for w in kept:
+            if w == "..." and result and result[-1] == "...":
+                continue
+            result.append(w)
+        return " ".join(result)
+    return _selector
+
+
+def n_plus_7(context_fn: ContextFn, wordlist: list[str] | None = None,
+             offset: int = 7) -> ContextFn:
+    """Oulipo N+7: replace each noun-like word with the word N positions
+    later in a dictionary.
+
+    Without NLTK or a POS tagger, we use a heuristic: replace words
+    longer than 3 characters that aren't common function words.
+    A custom wordlist can be provided; otherwise uses a built-in
+    small poetic vocabulary.
+    """
+    _function_words = frozenset({
+        "the", "a", "an", "and", "but", "or", "nor", "for", "yet", "so",
+        "in", "on", "at", "to", "by", "of", "with", "from", "into", "onto",
+        "is", "are", "was", "were", "be", "been", "being", "am",
+        "has", "have", "had", "do", "does", "did", "will", "would",
+        "shall", "should", "may", "might", "can", "could", "must",
+        "not", "no", "if", "then", "than", "that", "this", "these", "those",
+        "it", "its", "he", "she", "they", "we", "you", "me", "him", "her",
+        "us", "them", "my", "your", "his", "our", "their",
+        "who", "whom", "whose", "which", "what", "where", "when", "how", "why",
+        "all", "each", "every", "both", "few", "more", "most", "some", "any",
+        "very", "too", "also", "just", "only", "still", "never", "always",
+    })
+    words_db = wordlist if wordlist is not None else _default_wordlist()
+
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        result = []
+        for word in text.split():
+            clean = word.lower().strip(".,!?;:'\"")
+            if len(clean) > 3 and clean not in _function_words and words_db:
+                replacement = _lookup_offset(clean, words_db, offset)
+                result.append(replacement)
+            else:
+                result.append(word)
+        return " ".join(result)
+    return _selector
+
+
+def _default_wordlist() -> list[str]:
+    """A small curated wordlist for N+7 — poetic nouns and adjectives."""
+    return sorted([
+        "river", "stone", "light", "shadow", "water", "fire", "wind", "rain",
+        "bone", "glass", "silver", "golden", "iron", "copper", "dust", "ash",
+        "moon", "star", "sun", "cloud", "storm", "thunder", "lightning", "snow",
+        "rose", "thorn", "seed", "root", "branch", "leaf", "flower", "bloom",
+        "bird", "crow", "swan", "moth", "wolf", "deer", "horse", "bear",
+        "hand", "eye", "mouth", "heart", "blood", "breath", "voice", "song",
+        "door", "window", "wall", "floor", "roof", "bridge", "road", "path",
+        "night", "dawn", "dusk", "morning", "evening", "hour", "moment", "year",
+        "dream", "sleep", "wake", "silence", "echo", "ghost", "memory", "name",
+        "salt", "honey", "milk", "wine", "bread", "smoke", "flame", "ember",
+        "ocean", "tide", "wave", "shore", "island", "mountain", "valley", "field",
+        "thread", "needle", "cloth", "silk", "wool", "string", "knot", "ribbon",
+        "bell", "drum", "flute", "harp", "choir", "hymn", "prayer", "psalm",
+        "knife", "sword", "arrow", "shield", "crown", "throne", "tower", "ruin",
+    ])
+
+
+def _lookup_offset(word: str, wordlist: list[str], offset: int) -> str:
+    """Find word's position in sorted wordlist and return the word N places later."""
+    import bisect
+    idx = bisect.bisect_left(wordlist, word)
+    return wordlist[(idx + offset) % len(wordlist)]
+
+
+def markov_chain(context_fn: ContextFn, order: int = 2,
+                 seed: int | None = None) -> ContextFn:
+    """Build a Markov chain from the poem text and generate from it.
+
+    The chain is built from the context each turn, so it evolves as
+    the poem grows. Short poems produce short chains; the output
+    gets more interesting as material accumulates.
+    """
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        words = text.split()
+        if len(words) <= order:
+            return text
+
+        # build transition table
+        transitions: dict[tuple[str, ...], list[str]] = defaultdict(list)
+        for i in range(len(words) - order):
+            key = tuple(words[i:i + order])
+            transitions[key].append(words[i + order])
+
+        if not transitions:
+            return text
+
+        rng = random.Random(seed if seed is not None else len(poem))
+        # start from a random key
+        keys = list(transitions.keys())
+        state = rng.choice(keys)
+        result = list(state)
+        for _ in range(15):  # generate up to 15 words
+            choices = transitions.get(state)
+            if not choices:
+                break
+            next_word = rng.choice(choices)
+            result.append(next_word)
+            state = tuple(result[-order:])
+
+        return " ".join(result)
     return _selector
 
 
@@ -249,6 +423,14 @@ rhyme   = make_constrained_generator(last_lines(1), rhyme_scorer())
 hopeful = make_constrained_generator(last_lines(1), sentiment_scorer(0.6))
 somber  = make_constrained_generator(last_lines(1), sentiment_scorer(-0.6))
 
+# context-transformed generators — experimental / Oulipo-inspired
+cutup    = make_generator(cut_up(line_window(3)))
+erased   = make_generator(erasure(last_lines(1), keep_ratio=0.4))
+folded   = make_generator(fold_in(first_lines(1), last_lines(1)))
+markov   = make_generator(markov_chain(line_window(5), order=1))
+oulipo   = make_generator(n_plus_7(last_lines(1)))
+dissolve = make_generator(erasure(n_plus_7(line_window(3)), keep_ratio=0.5))
+
 
 # Zero-arg generators registered for the CLI.
 GENERATORS: dict[str, GeneratorFn] = {
@@ -261,6 +443,12 @@ GENERATORS: dict[str, GeneratorFn] = {
     "rhyme":       rhyme,
     "hopeful":     hopeful,
     "somber":      somber,
+    "cutup":       cutup,
+    "erased":      erased,
+    "folded":      folded,
+    "markov":      markov,
+    "oulipo":      oulipo,
+    "dissolve":    dissolve,
 }
 
 # Parameterized factories: CLI calls these as  name:arg  (e.g. syllables:5).
@@ -278,5 +466,14 @@ GENERATOR_FACTORIES: dict[str, Callable[[str], GeneratorFn]] = {
     "sentiment": lambda arg: make_constrained_generator(
         last_lines(1),
         sentiment_scorer(float(arg)),
+    ),
+    "erasure": lambda arg: make_generator(
+        erasure(last_lines(1), keep_ratio=float(arg)),
+    ),
+    "nplus": lambda arg: make_generator(
+        n_plus_7(last_lines(1), offset=int(arg)),
+    ),
+    "markov": lambda arg: make_generator(
+        markov_chain(line_window(5), order=int(arg)),
     ),
 }

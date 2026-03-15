@@ -240,3 +240,40 @@ Ruled out for now: we're fine-tuning locally, training tooling is Python-first, 
 The generator strategy pattern and the constraint/sampling pipeline are naturally functional in character. A Lisp or ML-family language (OCaml, Clojure, etc.) would express composable constraint stacks and higher-order generator strategies more elegantly than Python. The idea isn't dismissed — there may be a place for a small Lisp-shaped DSL at the composition layer if the agent-interaction surface grows complex enough to warrant it.
 
 Ruled out for now: agents are the primary surface interacting with this code, and Python maximizes agent legibility and modifiability. Starting with a Lisp layer adds friction before the composition model is even settled.
+
+---
+
+## ADR-010: Context transformers — computational poetry techniques
+
+**Status:** Decided
+
+**Context:**
+The generator architecture separates context selection (`ContextFn`) from model invocation (`GeneratorFn`). This creates a natural insertion point for text transformation: functions of type `ContextFn -> ContextFn` that reshape text between selection and model input. Several traditions of computational and constrained poetry map directly onto this pattern.
+
+**Decision:**
+Implement five context transformers inspired by Oulipo, Burroughs, and erasure poetry:
+
+- `cut_up(context_fn, seed)` — Burroughs cut-up: shuffle words from context into new order
+- `fold_in(fn_a, fn_b)` — Burroughs fold-in: interleave words from two context sources
+- `erasure(context_fn, keep_ratio, seed)` — erasure poetry: randomly remove words, collapse gaps to `...`
+- `n_plus_7(context_fn, wordlist, offset)` — Oulipo N+7: replace content words with words N positions later in a dictionary
+- `markov_chain(context_fn, order, seed)` — build a Markov chain from poem text and sample from it
+
+These compose with existing context selectors (`last_lines`, `line_window`, etc.) and with each other: `erasure(n_plus_7(line_window(3)))` is a valid pipeline. Named instances registered in `GENERATORS`: `cutup`, `erased`, `folded`, `markov`, `oulipo`, `dissolve` (erasure + n_plus_7 composition).
+
+**Design principles:**
+- Transformers are pure functions on text. No model calls, no side effects.
+- Seeded randomness (defaulting to poem length) for reproducibility in tests.
+- N+7 uses a curated poetic wordlist (120 words: natural phenomena, body, architecture, music, weaponry) rather than requiring NLTK or a system dictionary.
+- Function words are preserved by N+7 to maintain syntactic structure.
+- Everything is stdlib-only — no new dependencies.
+
+**Ruled out:**
+- *NLTK POS tagging for N+7* — too heavy for a heuristic that works well enough. The function-word filter catches most cases.
+- *Character-level transformers* — interesting but the model tokenizer operates on words/subwords; character shuffling produces gibberish inputs.
+- *Deterministic erasure patterns (every Nth word)* — less interesting than random; the gaps should feel organic.
+
+**Consequences:**
+- The transformer layer is a new compositional axis: any `ContextFn` can be wrapped by any transformer, and transformers compose with each other.
+- The `dissolve` generator (erasure + n_plus_7) demonstrates multi-technique composition as a first-class pattern.
+- Parameterized CLI factories (`erasure:0.3`, `nplus:7`, `markov:2`) let users experiment from the command line.

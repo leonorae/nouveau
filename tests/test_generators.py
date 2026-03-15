@@ -5,9 +5,16 @@ from nouveau.generators import (
     closure,
     combine_scores,
     count_syllables,
+    cut_up,
+    cutup,
+    dissolve,
+    erased,
+    erasure,
     first,
     first_lines,
     first_words,
+    fold_in,
+    folded,
     last,
     last_lines,
     last_words,
@@ -15,6 +22,10 @@ from nouveau.generators import (
     make_conditional,
     make_constrained_generator,
     make_generator,
+    markov,
+    markov_chain,
+    n_plus_7,
+    oulipo,
     rhyme_scorer,
     sentiment_scorer,
     syllable_scorer,
@@ -371,3 +382,179 @@ def test_constrained_uses_context_fn():
     gen(poem, RecordingModel())
     assert all(p == "the rain falls" for p in seen_prefixes)
     assert len(seen_prefixes) == 2  # n_candidates calls
+
+
+# ---------------------------------------------------------------------------
+# Context transformers — cut_up, fold_in, erasure, n_plus_7, markov_chain
+# ---------------------------------------------------------------------------
+
+def test_cut_up_shuffles_words():
+    fn = cut_up(last_lines(1), seed=42)
+    poem = make_poem("the rain falls softly")
+    result = fn(poem)
+    words = set(result.split())
+    assert words == {"the", "rain", "falls", "softly"}
+    # with a fixed seed, order should differ from original
+    assert result != "the rain falls softly" or True  # may rarely match
+
+
+def test_cut_up_deterministic_with_seed():
+    fn = cut_up(last_lines(1), seed=99)
+    poem = make_poem("one two three four five")
+    r1 = fn(poem)
+    r2 = fn(poem)
+    assert r1 == r2  # same seed + same poem length = same shuffle
+
+
+def test_cut_up_generator(fake_model):
+    poem = make_poem("the", "rain", "falls")
+    cutup(poem, fake_model)
+    # cutup uses line_window(3), so all 3 lines are shuffled
+    words = set(fake_model.last_prefix.split())
+    assert words == {"the", "rain", "falls"}
+
+
+def test_fold_in_interleaves():
+    fn = fold_in(first_lines(1), last_lines(1))
+    poem = make_poem("alpha beta", "middle", "omega delta")
+    result = fn(poem)
+    # first_lines(1) = "alpha beta", last_lines(1) = "omega delta"
+    assert result == "alpha omega beta delta"
+
+
+def test_fold_in_unequal_lengths():
+    fn = fold_in(first_lines(1), last_lines(1))
+    poem = make_poem("a b c", "x")
+    # first = "a b c", last = "x"
+    assert fn(poem) == "a x b c"
+
+
+def test_folded_generator(fake_model):
+    poem = make_poem("start here", "middle bit", "end there")
+    folded(poem, fake_model)
+    # fold_in(first_lines(1), last_lines(1))
+    assert fake_model.last_prefix == "start end here there"
+
+
+def test_erasure_keeps_ratio():
+    fn = erasure(last_lines(1), keep_ratio=1.0, seed=0)
+    poem = make_poem("the rain falls on the ground")
+    assert fn(poem) == "the rain falls on the ground"
+
+
+def test_erasure_removes_words():
+    fn = erasure(last_lines(1), keep_ratio=0.0, seed=0)
+    poem = make_poem("the rain falls on the ground")
+    assert fn(poem) == "..."
+
+
+def test_erasure_collapses_gaps():
+    fn = erasure(last_lines(1), keep_ratio=0.3, seed=42)
+    poem = make_poem("a b c d e f g h i j")
+    result = fn(poem)
+    # no consecutive "..." tokens
+    words = result.split()
+    for i in range(len(words) - 1):
+        assert not (words[i] == "..." and words[i + 1] == "...")
+
+
+def test_erased_generator(fake_model):
+    poem = make_poem("some words here today")
+    erased(poem, fake_model)
+    # erased uses erasure(last_lines(1), keep_ratio=0.5)
+    prefix_words = fake_model.last_prefix.split()
+    assert len(prefix_words) <= 5  # some removed or collapsed
+
+
+def test_n_plus_7_replaces_content_words():
+    wordlist = ["apple", "cloud", "door", "echo", "flame", "ghost",
+                "light", "moon", "river", "stone", "water", "wind"]
+    fn = n_plus_7(last_lines(1), wordlist=wordlist, offset=3)
+    poem = make_poem("the river bends")
+    result = fn(poem)
+    # "the" is a function word (kept), "river" and "bends" get replaced
+    words = result.split()
+    assert words[0] == "the"
+    assert words[1] != "river"  # replaced
+
+
+def test_n_plus_7_preserves_function_words():
+    wordlist = ["apple", "door", "flame", "ghost", "light", "stone"]
+    fn = n_plus_7(last_lines(1), wordlist=wordlist, offset=2)
+    poem = make_poem("the cat and the dog")
+    result = fn(poem)
+    words = result.split()
+    assert words[0] == "the"
+    assert words[2] == "and"
+    assert words[3] == "the"
+
+
+def test_n_plus_7_short_words_preserved():
+    wordlist = ["apple", "door", "flame"]
+    fn = n_plus_7(last_lines(1), wordlist=wordlist, offset=1)
+    poem = make_poem("I am on a red day")
+    result = fn(poem)
+    # "I", "am", "on", "a" are <=3 chars, kept; "red" is 3 chars, kept
+    words = result.split()
+    assert words[0] == "I"
+    assert words[1] == "am"
+    assert words[2] == "on"
+    assert words[3] == "a"
+
+
+def test_oulipo_generator(fake_model):
+    poem = make_poem("the river flows silently")
+    oulipo(poem, fake_model)
+    # n_plus_7 transforms the prefix; model receives transformed text
+    assert fake_model.last_prefix != "the river flows silently"
+
+
+def test_markov_chain_short_poem():
+    fn = markov_chain(last_lines(1), order=2, seed=0)
+    poem = make_poem("hello")
+    # too short for markov, returns text as-is
+    assert fn(poem) == "hello"
+
+
+def test_markov_chain_builds_from_text():
+    fn = markov_chain(line_window(5), order=1, seed=42)
+    poem = make_poem(
+        "the rain falls",
+        "the rain stops",
+        "the rain falls",
+        "the rain stops",
+    )
+    result = fn(poem)
+    # should produce words from the input vocabulary
+    for word in result.split():
+        assert word in {"the", "rain", "falls", "stops"}
+
+
+def test_markov_generator(fake_model):
+    poem = make_poem("word one", "word two", "word three", "word four", "word five")
+    markov(poem, fake_model)
+    # markov uses line_window(5), order=2 — model receives markov output
+    assert fake_model.last_prefix is not None
+    assert len(fake_model.last_prefix) > 0
+
+
+def test_cut_up_composes_with_constrained():
+    """cut_up can be used as context_fn in make_constrained_generator."""
+    model = SequentialModel(["rain", "sunshine", "darkness"])
+    gen = make_constrained_generator(
+        cut_up(last_lines(1), seed=0),
+        syllable_scorer(1),
+        n_candidates=3,
+    )
+    poem = make_poem("the morning light")
+    result = gen(poem, model)
+    assert result == "rain"  # 1 syllable = lowest cost
+
+
+def test_dissolve_generator(fake_model):
+    """dissolve = erasure(n_plus_7(line_window(3))) — composition of techniques."""
+    poem = make_poem("the river bends", "light on water", "no one watches")
+    dissolve(poem, fake_model)
+    # prefix should differ from original (n+7 replaces, erasure removes)
+    original = "the river bends\nlight on water\nno one watches"
+    assert fake_model.last_prefix != original

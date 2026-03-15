@@ -68,8 +68,10 @@ def compose(max_lines: int, generator: str, model_name: str, temperature: float)
     MAX_LINES is the total number of lines before the poem ends.
 
     GENERATOR is the strategy for AI line generation. Pass a name
-    (last, first, window, bookend, alternating, closure, rhyme, hopeful, somber)
-    or a parameterized factory (syllables:5, rhyme:4, sentiment:0.8).
+    (last, first, window, bookend, alternating, closure, rhyme, hopeful, somber,
+    cutup, erased, folded, markov, oulipo, dissolve)
+    or a parameterized factory (syllables:5, rhyme:4, sentiment:0.8,
+    erasure:0.3, nplus:7, markov:2).
     """
     if max_lines < 2:
         raise click.BadParameter("must be at least 2", param_hint="MAX_LINES")
