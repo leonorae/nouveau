@@ -268,6 +268,9 @@ def markov_chain(context_fn: ContextFn, order: int = 2,
     The chain is built from the context each turn, so it evolves as
     the poem grows. Short poems produce short chains; the output
     gets more interesting as material accumulates.
+
+    Uses backoff: if the current state has no successors, drops to
+    a shorter state (order-1, then order-0) before giving up.
     """
     def _selector(poem: "Poem") -> str:
         text = context_fn(poem)
@@ -275,25 +278,34 @@ def markov_chain(context_fn: ContextFn, order: int = 2,
         if len(words) <= order:
             return text
 
-        # build transition table
-        transitions: dict[tuple[str, ...], list[str]] = defaultdict(list)
-        for i in range(len(words) - order):
-            key = tuple(words[i:i + order])
-            transitions[key].append(words[i + order])
+        # build transition tables at all orders for backoff
+        tables: list[dict[tuple[str, ...], list[str]]] = []
+        for o in range(1, order + 1):
+            t: dict[tuple[str, ...], list[str]] = defaultdict(list)
+            for i in range(len(words) - o):
+                key = tuple(words[i:i + o])
+                t[key].append(words[i + o])
+            tables.append(t)
 
-        if not transitions:
+        if not tables[-1]:
             return text
 
         rng = random.Random(seed if seed is not None else len(poem))
-        # start from a random key
-        keys = list(transitions.keys())
+        # start from a random key at the highest order
+        keys = list(tables[-1].keys())
         state = rng.choice(keys)
         result = list(state)
         for _ in range(15):  # generate up to 15 words
-            choices = transitions.get(state)
-            if not choices:
+            # try highest order first, back off to lower orders
+            next_word = None
+            for o in range(order, 0, -1):
+                backoff_state = tuple(result[-o:])
+                choices = tables[o - 1].get(backoff_state)
+                if choices:
+                    next_word = rng.choice(choices)
+                    break
+            if next_word is None:
                 break
-            next_word = rng.choice(choices)
             result.append(next_word)
             state = tuple(result[-order:])
 
