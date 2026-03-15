@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nouveau — collected artifacts</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@300&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --fg: #c8c4b8;
+    --accent: #7a6f5d;
+    --dim: #4a4640;
+    --highlight: #d4c9a8;
+    --section-bg: #0f0f16;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'EB Garamond', Georgia, serif;
+    font-size: 18px;
+    line-height: 1.7;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 60px 24px 120px;
+  }
+
+  h1 {
+    font-size: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 300;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 60px;
+    border-bottom: 1px solid var(--dim);
+    padding-bottom: 12px;
+  }
+
+  .poem {
+    margin: 48px 0;
+    padding: 32px 0;
+    border-top: 1px solid #1a1a24;
+  }
+
+  .poem:first-of-type { border-top: none; }
+
+  .poem-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 300;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    margin-bottom: 20px;
+    text-transform: uppercase;
+  }
+
+  .poem-body {
+    font-size: 19px;
+    line-height: 1.9;
+    color: var(--highlight);
+  }
+
+  .poem-body .gap {
+    color: var(--dim);
+    letter-spacing: 0.1em;
+  }
+
+  .poem-source {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--dim);
+    margin-top: 16px;
+    letter-spacing: 0.05em;
+  }
+
+  .reflection {
+    margin: 80px 0 48px;
+    padding-top: 40px;
+    border-top: 1px solid var(--accent);
+  }
+
+  .reflection h2 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 300;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 28px;
+  }
+
+  .reflection p {
+    margin-bottom: 20px;
+    color: var(--fg);
+    font-size: 16px;
+    line-height: 1.8;
+  }
+
+  .reflection em {
+    color: var(--highlight);
+    font-style: italic;
+  }
+
+  .technique-tag {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    color: var(--dim);
+    border: 1px solid #1a1a24;
+    padding: 2px 8px;
+    border-radius: 2px;
+    margin-right: 6px;
+    text-transform: uppercase;
+  }
+
+  .colophon {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid #1a1a24;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--dim);
+    line-height: 2;
+  }
+</style>
+</head>
+<body>
+
+<h1>nouveau &mdash; collected artifacts</h1>
+
+<!-- POEM 1 -->
+<div class="poem">
+  <div class="poem-title">I. The Absence Speaks</div>
+  <div class="poem-body">
+    <span class="gap">...</span> life is hung <span class="gap">...</span> flood <span class="gap">...</span> wave-blurred portrait<br>
+    <span class="gap">...</span> the river <span class="gap">...</span> over <span class="gap">...</span> the <span class="gap">...</span> gave me <span class="gap">...</span>
+  </div>
+  <div class="poem-source">
+    <span class="technique-tag">erasure</span>
+    <span class="technique-tag">niedecker</span>
+    keep_ratio=0.4, seed=42
+  </div>
+</div>
+
+<!-- POEM 2 -->
+<div class="poem">
+  <div class="poem-title">II. Bell Is Wave</div>
+  <div class="poem-body">
+    bell is wave by wave<br>
+    name by the ruin salt<br>
+    year by window seed<br>
+    by its cloth wool
+  </div>
+  <div class="poem-source">
+    <span class="technique-tag">n+7</span>
+    <span class="technique-tag">dickinson</span>
+    offset=11 &mdash; "Water, is taught by thirst" displaced through a poetic dictionary
+  </div>
+</div>
+
+<!-- POEM 3 -->
+<div class="poem">
+  <div class="poem-title">III. Markov Séance</div>
+  <div class="poem-body">
+    Time passes But I see only the sound of the ocean passed<br>
+    <br>
+    Along the blue sky Till now I see only the Pleiades It<br>
+    <br>
+    stone I destroy it must be cool and always the word Nothing
+  </div>
+  <div class="poem-source">
+    <span class="technique-tag">markov</span>
+    <span class="technique-tag">cross-corpus</span>
+    order=1 &mdash; Basho, Sappho, Dickinson, Szymborska, Simic colliding
+  </div>
+</div>
+
+<!-- POEM 4 -->
+<div class="poem">
+  <div class="poem-title">IV. Pronounce</div>
+  <div class="poem-body">
+    I word<br>
+    first to past<br>
+    I word<br>
+    I it<br>
+    I word Nothing<br>
+    I no can hold
+  </div>
+  <div class="poem-source">
+    <span class="technique-tag">lipogram</span>
+    <span class="technique-tag">szymborska</span>
+    banned='e' &mdash; what survives when you cannot say "the," "pronounce," "silence," "sentence"
+  </div>
+</div>
+
+<!-- POEM 5 -->
+<div class="poem">
+  <div class="poem-title">V. Seed Bridge</div>
+  <div class="poem-body">
+    <span class="gap">...</span> seed bridge where <span class="gap">...</span> moth glass into smoke<br>
+    what <span class="gap">...</span> morning it <span class="gap">...</span> salt<br>
+    <span class="gap">...</span> dusk the <span class="gap">...</span> of eye in <span class="gap">...</span>
+  </div>
+  <div class="poem-source">
+    <span class="technique-tag">dissolve</span>
+    <span class="technique-tag">n+7 + erasure</span>
+    the agent poem through two layers of transformation
+  </div>
+</div>
+
+<!-- POEM 6 -->
+<div class="poem">
+  <div class="poem-title">VI. Wherever / Yet</div>
+  <div class="poem-body">
+    Wherever I am I must be what cool is and missing quiet<br>
+    <br>
+    In Go a inside field a I stone am that the would absence be of my field way
+  </div>
+  <div class="poem-source">
+    <span class="technique-tag">fold-in</span>
+    <span class="technique-tag">strand + simic</span>
+    two poets interleaved word by word &mdash; Strand's absence meets Simic's stone
+  </div>
+</div>
+
+<!-- POEM 7 -->
+<div class="poem">
+  <div class="poem-title">VII. Rain on the Leaf</div>
+  <div class="poem-body">
+    rain on the leaf of a storm<br>
+    I have never been in<br>
+    wall morning valley shore<br>
+    the psalm crow crown door<br>
+    its snow<br>
+    a golden I psalm the water of not the needle
+  </div>
+  <div class="poem-source">
+    <span class="technique-tag">n+7</span>
+    <span class="technique-tag">agent poem</span>
+    offset=17 &mdash; the furthest displacement, where "light" became "rain" and "room" became "storm"
+  </div>
+</div>
+
+<!-- POEM 8 -->
+<div class="poem">
+  <div class="poem-title">VIII. Strand, Erased</div>
+  <div class="poem-body">
+    <span class="gap">...</span> a field I <span class="gap">...</span> of <span class="gap">...</span><br>
+    This is <span class="gap">...</span> the case <span class="gap">...</span><br>
+    am <span class="gap">...</span> what <span class="gap">...</span><br>
+    I <span class="gap">...</span> part the <span class="gap">...</span><br>
+    body has been<br>
+    We all have reasons <span class="gap">...</span><br>
+    move to <span class="gap">...</span>
+  </div>
+  <div class="poem-source">
+    <span class="technique-tag">erasure</span>
+    <span class="technique-tag">strand</span>
+    keep_ratio=0.3, seed=42 &mdash; "Keeping Things Whole" with 70% removed
+  </div>
+</div>
+
+<!-- POEM 9 -->
+<div class="poem">
+  <div class="poem-title">IX. Simic Through Towers</div>
+  <div class="poem-body">
+    Go morning <span class="gap">...</span> tower <span class="gap">...</span> would be <span class="gap">...</span> way<br>
+    I am light to <span class="gap">...</span> a tower<br>
+    <span class="gap">...</span> must <span class="gap">...</span> ember <span class="gap">...</span><br>
+    shield seed wave is <span class="gap">...</span> psalm<br>
+    <span class="gap">...</span> thunder <span class="gap">...</span> wind cloud a <span class="gap">...</span><br>
+    Just hand <span class="gap">...</span> to ocean<br>
+    <span class="gap">...</span> voice <span class="gap">...</span> the <span class="gap">...</span> bell
+  </div>
+  <div class="poem-source">
+    <span class="technique-tag">n+7</span>
+    <span class="technique-tag">erasure</span>
+    <span class="technique-tag">simic</span>
+    "Stone" displaced +11, then half-erased &mdash; the stone becomes a tower, the writings become a bell
+  </div>
+</div>
+
+<!-- POEM 10 -->
+<div class="poem">
+  <div class="poem-title">X. The Original</div>
+  <div class="poem-body">
+    light on the floor of a room I have never been in<br>
+    someone's handwriting, slanted &mdash; nevertheless<br>
+    the last word arrives before its reason<br>
+    a door I know the sound of, not the house
+  </div>
+  <div class="poem-source">
+    <span class="technique-tag">agent-written</span>
+    the poem an earlier Claude wrote in the code comments, before any transformation
+  </div>
+</div>
+
+<!-- REFLECTION -->
+<div class="reflection">
+  <h2>Process Notes</h2>
+
+  <p>These poems were generated by building a system of composable text transformations and running gathered source material through them. No neural model was involved in the selection &mdash; the outputs shown here are the results of purely algorithmic operations (shuffling, erasure, dictionary displacement, Markov chains, interleaving) applied to human-written poetry.</p>
+
+  <p>The most surprising discovery was how much <em>the source text matters more than the technique</em>. Erasure on Strand ("Keeping Things Whole") produces something that feels like a Strand poem because his vocabulary is already so precise that any subset carries weight. Erasure on lesser material just produces fragments. The same N+7 offset applied to Dickinson vs. Szymborska produces wildly different textures because their syntactic skeletons are so different.</p>
+
+  <p>The <em>soft constraint</em> approach &mdash; scoring candidates on a gradient rather than filtering them through a gate &mdash; turned out to be the most important architectural decision. A hard lipogram that bans the letter 'e' produces Szymborska's "I word / first to past / I word / I it" &mdash; striking but brutal. A soft lipogram that merely <em>prefers</em> candidates with fewer e's produces text that leans away from 'e' without collapsing into telegraph. The soft version is more like a sensibility than a rule.</p>
+
+  <p>The <em>composed aesthetic profiles</em> (sparse, dense, ghost, echo, strange) are the most interesting outcome. Each one is just a weighted sum of simple scorers, but they genuinely prefer different text. "rust knows what iron forgot" scores perfectly under <em>ghost</em> (no 'e', terse, novel) and terribly under <em>dense</em> (too short, not alliterative). The profiles behave like different readers with different tastes, which is exactly what you want for multi-agent scenarios: each agent has a reward function that encodes an aesthetic.</p>
+
+  <p>The poems I keep returning to are the ones where the technique <em>reveals</em> something the original concealed. Strand erased to "am ... what ... I ... part the ... body has been / We all have reasons ... move to ..." strips his poem to its existential armature. Simic's stone becoming a tower, then half-erased to "I am light to ... a tower / ... must ... ember ... / shield seed wave is ... psalm" &mdash; the displacement finds a religious register that was latent in the original's imagery of inner walls and star-charts.</p>
+
+  <p>The Markov outputs are the wildest. "stone I destroy it must be cool and always the word Nothing" fuses Simic's stone with Szymborska's philosophical grammar into something neither poet wrote but both would recognize. The chain doesn't understand either poem, but it finds the seam where they touch.</p>
+
+  <p>All of this is infrastructure for the real thing: a human and an AI writing together, with these transformations and constraints shaping what the AI produces. The scorer architecture is already the reward function for RL. The context transformers are already the prompt engineering. What's missing is the loop &mdash; the model generating, the human responding, the model learning what this particular human finds beautiful. That's next.</p>
+</div>
+
+<div class="colophon">
+  nouveau &mdash; human-AI collaborative poetry<br>
+  generated with: cut_up, fold_in, erasure, n_plus_7, markov_chain, lipogram<br>
+  scored with: lipogram_scorer, novelty_scorer, length_scorer, alliteration_scorer,<br>
+  &nbsp;&nbsp;consonance_scorer, divergence_scorer, vocabulary_scorer<br>
+  source material: dickinson, basho, li bai, sappho, h.d., niedecker, strand,<br>
+  &nbsp;&nbsp;szymborska, simic, herbert, ponge, rilke, and one earlier claude<br>
+  115 tests passing &bull; no neural model used in selection &bull; stdlib only<br>
+  <br>
+  claude/review-repository-k33Uw
+</div>
+
+</body>
+</html>
