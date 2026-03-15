@@ -195,6 +195,23 @@ def erasure(context_fn: ContextFn, keep_ratio: float = 0.5,
     return _selector
 
 
+def lipogram(context_fn: ContextFn, banned: str = "e") -> ContextFn:
+    """Oulipo lipogram: remove all words containing banned letters.
+
+    The default bans 'e' (the most common English letter), following
+    Perec's 'La Disparition'. The surviving words form a skeletal text
+    that the model completes.
+    """
+    banned_set = frozenset(banned.lower())
+
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        words = text.split()
+        kept = [w for w in words if not (set(w.lower()) & banned_set)]
+        return " ".join(kept) if kept else text
+    return _selector
+
+
 def n_plus_7(context_fn: ContextFn, wordlist: list[str] | None = None,
              offset: int = 7) -> ContextFn:
     """Oulipo N+7: replace each noun-like word with the word N positions
@@ -413,6 +430,40 @@ def sentiment_scorer(target: float) -> ScoreFactory:
     return make_score
 
 
+def _jaccard(a: set, b: set) -> float:
+    """Jaccard similarity between two sets. Returns 0.0 if both empty."""
+    if not a and not b:
+        return 1.0
+    union = a | b
+    return len(a & b) / len(union) if union else 0.0
+
+
+def divergence_scorer(min_sim: float = 0.1, max_sim: float = 0.6) -> ScoreFactory:
+    """Cost penalizes output that is too similar or too dissimilar to the last line.
+
+    Uses Jaccard similarity on word sets. Output in the band
+    [min_sim, max_sim] scores 0; outside it, cost increases linearly.
+    This implements "related divergence" — output that is inspired by
+    but different from the input.
+    """
+    def make_score(poem: "Poem") -> Callable[[str], float]:
+        if not poem.lines:
+            return lambda text: 0.0
+        ref_words = set(poem[-1].lower().split())
+
+        def score(text: str) -> float:
+            candidate_words = set(text.lower().split())
+            sim = _jaccard(ref_words, candidate_words)
+            if sim < min_sim:
+                return min_sim - sim
+            if sim > max_sim:
+                return sim - max_sim
+            return 0.0
+
+        return score
+    return make_score
+
+
 # ---------------------------------------------------------------------------
 # Named generator instances
 # ---------------------------------------------------------------------------
@@ -441,7 +492,9 @@ erased   = make_generator(erasure(last_lines(1), keep_ratio=0.4))
 folded   = make_generator(fold_in(first_lines(1), last_lines(1)))
 markov   = make_generator(markov_chain(line_window(5), order=1))
 oulipo   = make_generator(n_plus_7(last_lines(1)))
-dissolve = make_generator(erasure(n_plus_7(line_window(3)), keep_ratio=0.5))
+dissolve  = make_generator(erasure(n_plus_7(line_window(3)), keep_ratio=0.5))
+vanish    = make_generator(lipogram(last_lines(1), banned="e"))
+drift     = make_constrained_generator(last_lines(1), divergence_scorer())
 
 
 # Zero-arg generators registered for the CLI.
@@ -461,6 +514,8 @@ GENERATORS: dict[str, GeneratorFn] = {
     "markov":      markov,
     "oulipo":      oulipo,
     "dissolve":    dissolve,
+    "vanish":      vanish,
+    "drift":       drift,
 }
 
 # Parameterized factories: CLI calls these as  name:arg  (e.g. syllables:5).
@@ -487,5 +542,8 @@ GENERATOR_FACTORIES: dict[str, Callable[[str], GeneratorFn]] = {
     ),
     "markov": lambda arg: make_generator(
         markov_chain(line_window(5), order=int(arg)),
+    ),
+    "lipogram": lambda arg: make_generator(
+        lipogram(last_lines(1), banned=arg),
     ),
 }

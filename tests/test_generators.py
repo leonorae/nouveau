@@ -7,7 +7,9 @@ from nouveau.generators import (
     count_syllables,
     cut_up,
     cutup,
+    divergence_scorer,
     dissolve,
+    drift,
     erased,
     erasure,
     first,
@@ -19,6 +21,7 @@ from nouveau.generators import (
     last_lines,
     last_words,
     line_window,
+    lipogram,
     make_conditional,
     make_constrained_generator,
     make_generator,
@@ -29,6 +32,7 @@ from nouveau.generators import (
     rhyme_scorer,
     sentiment_scorer,
     syllable_scorer,
+    vanish,
     window,
 )
 from nouveau.poem import Poem
@@ -558,3 +562,85 @@ def test_dissolve_generator(fake_model):
     # prefix should differ from original (n+7 replaces, erasure removes)
     original = "the river bends\nlight on water\nno one watches"
     assert fake_model.last_prefix != original
+
+
+# ---------------------------------------------------------------------------
+# Lipogram
+# ---------------------------------------------------------------------------
+
+def test_lipogram_removes_words_with_banned_letter():
+    fn = lipogram(last_lines(1), banned="e")
+    poem = make_poem("the river bends softly")
+    result = fn(poem)
+    # "the", "river", "bends" all contain 'e'; "softly" does not
+    assert "softly" in result
+    assert "the" not in result.split()
+    assert "river" not in result.split()
+
+
+def test_lipogram_preserves_clean_words():
+    fn = lipogram(last_lines(1), banned="z")
+    poem = make_poem("the river bends")
+    assert fn(poem) == "the river bends"
+
+
+def test_lipogram_multi_char_ban():
+    fn = lipogram(last_lines(1), banned="aei")
+    poem = make_poem("sun moon star dust")
+    result = fn(poem)
+    # "sun" has u (ok), "moon" has o (ok), "star" has a (banned), "dust" has u (ok)
+    assert "star" not in result.split()
+    assert "moon" in result.split()
+
+
+def test_lipogram_empty_result_returns_original():
+    fn = lipogram(last_lines(1), banned="aeiouy")
+    poem = make_poem("the rain falls")
+    result = fn(poem)
+    # all words have vowels; should return original as fallback
+    assert result == "the rain falls"
+
+
+def test_vanish_generator(fake_model):
+    poem = make_poem("soft glow upon a hill")
+    vanish(poem, fake_model)
+    # vanish = lipogram(last_lines(1), banned="e")
+    # none of these words contain 'e', so all should pass through
+    assert fake_model.last_prefix == "soft glow upon a hill"
+
+
+# ---------------------------------------------------------------------------
+# Divergence scorer
+# ---------------------------------------------------------------------------
+
+def test_divergence_scorer_identical_text():
+    poem = make_poem("the rain falls")
+    score = divergence_scorer(min_sim=0.1, max_sim=0.6)(poem)
+    # identical words → similarity = 1.0, exceeds max_sim
+    assert score("the rain falls") > 0
+
+
+def test_divergence_scorer_no_overlap():
+    poem = make_poem("the rain falls")
+    score = divergence_scorer(min_sim=0.1, max_sim=0.6)(poem)
+    # no shared words → similarity = 0.0, below min_sim
+    assert score("bright moon shining") > 0
+
+
+def test_divergence_scorer_in_band():
+    poem = make_poem("the rain falls softly down")
+    score = divergence_scorer(min_sim=0.1, max_sim=0.7)(poem)
+    # partial overlap: 2 of 7 unique words shared
+    assert score("the rain rises quickly up") < score("the rain falls softly down")
+
+
+def test_divergence_scorer_empty_poem():
+    poem = make_poem()
+    score = divergence_scorer()(poem)
+    assert score("anything at all") == 0.0
+
+
+def test_drift_generator(fake_model):
+    poem = make_poem("the morning light breaks")
+    drift(poem, fake_model)
+    assert fake_model.last_prefix is not None

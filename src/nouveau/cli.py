@@ -69,9 +69,9 @@ def compose(max_lines: int, generator: str, model_name: str, temperature: float)
 
     GENERATOR is the strategy for AI line generation. Pass a name
     (last, first, window, bookend, alternating, closure, rhyme, hopeful, somber,
-    cutup, erased, folded, markov, oulipo, dissolve)
+    cutup, erased, folded, markov, oulipo, dissolve, vanish, drift)
     or a parameterized factory (syllables:5, rhyme:4, sentiment:0.8,
-    erasure:0.3, nplus:7, markov:2).
+    erasure:0.3, nplus:7, markov:2, lipogram:e).
     """
     if max_lines < 2:
         raise click.BadParameter("must be at least 2", param_hint="MAX_LINES")
