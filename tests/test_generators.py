@@ -1,15 +1,19 @@
 from nouveau.generators import (
     _end_sound,
+    alliteration_scorer,
     alternating,
     bookend,
     closure,
     combine_scores,
+    consonance_scorer,
     count_syllables,
     cut_up,
     cutup,
+    dense,
     divergence_scorer,
     dissolve,
     drift,
+    echo,
     erased,
     erasure,
     first,
@@ -17,22 +21,29 @@ from nouveau.generators import (
     first_words,
     fold_in,
     folded,
+    ghost,
     last,
     last_lines,
     last_words,
+    length_scorer,
     line_window,
     lipogram,
+    lipogram_scorer,
     make_conditional,
     make_constrained_generator,
     make_generator,
     markov,
     markov_chain,
     n_plus_7,
+    novelty_scorer,
     oulipo,
     rhyme_scorer,
     sentiment_scorer,
+    sparse,
+    strange,
     syllable_scorer,
     vanish,
+    vocabulary_scorer,
     window,
 )
 from nouveau.poem import Poem
@@ -643,4 +654,159 @@ def test_divergence_scorer_empty_poem():
 def test_drift_generator(fake_model):
     poem = make_poem("the morning light breaks")
     drift(poem, fake_model)
+    assert fake_model.last_prefix is not None
+
+
+# ---------------------------------------------------------------------------
+# Soft constraint scorers
+# ---------------------------------------------------------------------------
+
+def test_lipogram_scorer_counts_banned_chars():
+    score = lipogram_scorer("e", weight_per_char=1.0)(None)
+    assert score("the") == 1.0  # one 'e'
+    assert score("breeze") == 3.0  # three 'e's
+    assert score("dog") == 0.0  # no 'e'
+
+
+def test_lipogram_scorer_soft_vs_hard():
+    """Soft lipogram prefers less-e text but doesn't eliminate it."""
+    score = lipogram_scorer("e")(None)
+    assert score("soft glow") < score("the breeze settles")
+
+
+def test_novelty_scorer_penalizes_recent_words():
+    poem = make_poem("the rain falls", "on the ground")
+    score = novelty_scorer(decay=0.8)(poem)
+    # "the" appeared in the last line (distance=1) → high penalty
+    assert score("the") > score("moon")
+
+
+def test_novelty_scorer_decay():
+    poem = make_poem("moon rises", "stars shine", "wind blows")
+    score = novelty_scorer(decay=0.5)(poem)
+    # "wind" is distance 1, "stars" distance 2, "moon" distance 3
+    assert score("wind") > score("moon")  # more recent = higher cost
+
+
+def test_novelty_scorer_empty_poem():
+    poem = make_poem()
+    score = novelty_scorer()(poem)
+    assert score("anything") == 0.0
+
+
+def test_novelty_scorer_new_word_is_free():
+    poem = make_poem("the rain falls")
+    score = novelty_scorer()(poem)
+    assert score("xylophone") == 0.0
+
+
+def test_length_scorer_exact():
+    score = length_scorer(5)(None)
+    assert score("one two three four five") == 0
+    assert score("one two three") == 2
+    assert score("one two three four five six seven") == 2
+
+
+def test_alliteration_scorer_rewards_pairs():
+    score = alliteration_scorer()(None)
+    assert score("bright blue blazing") < 0  # 2 alliterative pairs
+    assert score("the cat sat") == 0  # no alliteration
+    assert score("bright blue blazing") < score("bright cat blazing")
+
+
+def test_alliteration_scorer_single_word():
+    score = alliteration_scorer()(None)
+    assert score("word") == 0.0
+
+
+def test_consonance_scorer_high_density():
+    score = consonance_scorer(target_density=0.7)(None)
+    # "strict" is heavily consonantal
+    assert score("strict blank crst") < score("oui eau aie")
+
+
+def test_consonance_scorer_low_density():
+    score = consonance_scorer(target_density=0.3)(None)
+    # vowel-heavy text is closer to 0.3
+    assert score("a sea of ease") < score("strict blank thrust")
+
+
+def test_consonance_scorer_empty():
+    score = consonance_scorer()(None)
+    assert score("") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Composed aesthetic generators
+# ---------------------------------------------------------------------------
+
+def test_sparse_generator(fake_model):
+    poem = make_poem("the river bends slowly toward the sea")
+    sparse(poem, fake_model)
+    assert fake_model.last_prefix is not None
+
+
+def test_dense_generator(fake_model):
+    poem = make_poem("the river", "bends slowly", "toward the sea")
+    dense(poem, fake_model)
+    assert fake_model.last_prefix is not None
+
+
+def test_echo_generator(fake_model):
+    poem = make_poem("the rain falls softly")
+    echo(poem, fake_model)
+    assert fake_model.last_prefix is not None
+
+
+def test_ghost_generator(fake_model):
+    poem = make_poem("light on the water", "someone remembers", "the last word")
+    ghost(poem, fake_model)
+    assert fake_model.last_prefix is not None
+
+
+def test_soft_constraints_compose_with_combine_scores():
+    """Multiple soft scorers can be weighted and combined."""
+    combined = combine_scores(
+        lipogram_scorer("e"),
+        novelty_scorer(),
+        length_scorer(5),
+        weights=[1.0, 0.5, 2.0],
+    )
+    poem = make_poem("the rain falls")
+    score = combined(poem)
+    # "soft cold glow upon hills" — no e's, novel words, 5 words
+    # should score lower than "the rain falls on the breeze forever"
+    assert score("soft cold glow upon hills") < score("the rain falls on the breeze forever")
+
+
+# ---------------------------------------------------------------------------
+# Vocabulary scorer
+# ---------------------------------------------------------------------------
+
+def test_vocabulary_scorer_penalizes_repeated_words():
+    poem = make_poem("the river bends", "water flows down")
+    score = vocabulary_scorer(line_window(2))(poem)
+    # "the river flows" reuses 3 of 3 words from existing text
+    assert score("the river flows") > score("bright moon shining")
+
+
+def test_vocabulary_scorer_new_words_score_zero():
+    poem = make_poem("the river bends")
+    score = vocabulary_scorer(last_lines(1))(poem)
+    assert score("moon star cloud") == 0.0
+
+
+def test_vocabulary_scorer_empty_poem():
+    poem = make_poem()
+    score = vocabulary_scorer(line_window(5))(poem)
+    assert score("anything") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Strange generator
+# ---------------------------------------------------------------------------
+
+def test_strange_generator(fake_model):
+    poem = make_poem("the river bends slowly", "light on the water")
+    strange(poem, fake_model)
     assert fake_model.last_prefix is not None

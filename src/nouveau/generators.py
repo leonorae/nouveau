@@ -464,6 +464,119 @@ def divergence_scorer(min_sim: float = 0.1, max_sim: float = 0.6) -> ScoreFactor
     return make_score
 
 
+def lipogram_scorer(banned: str = "e", weight_per_char: float = 0.5) -> ScoreFactory:
+    """Soft lipogram: penalize (don't remove) words containing banned letters.
+
+    Cost = number of banned-letter occurrences in the text * weight_per_char.
+    A hard lipogram deletes; a soft lipogram nudges. The model can still
+    use banned letters if nothing better is available, but prefers to avoid them.
+    """
+    banned_set = frozenset(banned.lower())
+
+    def make_score(poem: "Poem") -> Callable[[str], float]:
+        def score(text: str) -> float:
+            return sum(1 for c in text.lower() if c in banned_set) * weight_per_char
+        return score
+    return make_score
+
+
+def novelty_scorer(decay: float = 0.8) -> ScoreFactory:
+    """Penalize words that have already appeared in the poem.
+
+    Each word's penalty decays exponentially by how many lines ago it
+    appeared — recent repetition costs more than distant echoes.
+    Cost = sum of decay^(distance) for each repeated word.
+    """
+    def make_score(poem: "Poem") -> Callable[[str], float]:
+        if not poem.lines:
+            return lambda text: 0.0
+        # build word->most-recent-distance map (1 = last line, 2 = line before, etc.)
+        word_dist: dict[str, int] = {}
+        for i, line in enumerate(reversed(poem.lines)):
+            for w in line.text.lower().split():
+                if w not in word_dist:
+                    word_dist[w] = i + 1
+
+        def score(text: str) -> float:
+            cost = 0.0
+            for w in text.lower().split():
+                if w in word_dist:
+                    cost += decay ** word_dist[w]
+            return cost
+
+        return score
+    return make_score
+
+
+def length_scorer(target_words: int) -> ScoreFactory:
+    """Cost = absolute distance from target word count."""
+    return lambda poem: lambda text: abs(len(text.split()) - target_words)
+
+
+def alliteration_scorer() -> ScoreFactory:
+    """Reward (negative cost) for alliterative patterns.
+
+    Cost = -count of adjacent word pairs sharing a first letter.
+    Lower is better, so more alliteration = lower cost.
+    """
+    def make_score(poem: "Poem") -> Callable[[str], float]:
+        def score(text: str) -> float:
+            words = [w.lower().strip(".,!?;:'\"") for w in text.split() if w]
+            if len(words) < 2:
+                return 0.0
+            pairs = sum(
+                1 for a, b in zip(words, words[1:])
+                if a and b and a[0] == b[0]
+            )
+            return -pairs  # negative = reward
+        return score
+    return make_score
+
+
+def consonance_scorer(target_density: float = 0.6) -> ScoreFactory:
+    """Penalize distance from a target consonant density.
+
+    Consonant density = fraction of alphabetic characters that are consonants.
+    High density (0.7+) creates percussive, clipped text.
+    Low density (0.4-) creates open, vowel-heavy flow.
+    """
+    _vowels = frozenset("aeiouy")
+
+    def make_score(poem: "Poem") -> Callable[[str], float]:
+        def score(text: str) -> float:
+            alpha = [c for c in text.lower() if c.isalpha()]
+            if not alpha:
+                return 0.0
+            consonants = sum(1 for c in alpha if c not in _vowels)
+            density = consonants / len(alpha)
+            return abs(density - target_density)
+        return score
+    return make_score
+
+
+def vocabulary_scorer(corpus_fn: ContextFn) -> ScoreFactory:
+    """Reward candidates that introduce words not yet in the poem's vocabulary.
+
+    Score = fraction of candidate words that already appear in the corpus
+    context. Lower = more novel vocabulary. Uses the corpus_fn to define
+    what counts as "already said."
+    """
+    def make_score(poem: "Poem") -> Callable[[str], float]:
+        existing = set(corpus_fn(poem).lower().split())
+        if not existing:
+            return lambda text: 0.0
+
+        def score(text: str) -> float:
+            words = text.lower().split()
+            if not words:
+                return 0.0
+            repeated = sum(1 for w in words if w in existing)
+            return repeated / len(words)
+
+        return score
+    return make_score
+
+
 # ---------------------------------------------------------------------------
 # Named generator instances
 # ---------------------------------------------------------------------------
@@ -496,6 +609,39 @@ dissolve  = make_generator(erasure(n_plus_7(line_window(3)), keep_ratio=0.5))
 vanish    = make_generator(lipogram(last_lines(1), banned="e"))
 drift     = make_constrained_generator(last_lines(1), divergence_scorer())
 
+# soft-constrained aesthetic personalities — composed scorers
+sparse = make_constrained_generator(
+    last_lines(1),
+    combine_scores(length_scorer(4), novelty_scorer(), consonance_scorer(0.4)),
+)
+dense = make_constrained_generator(
+    line_window(3),
+    combine_scores(length_scorer(8), alliteration_scorer(), consonance_scorer(0.7)),
+)
+echo = make_constrained_generator(
+    last_lines(1),
+    combine_scores(
+        divergence_scorer(0.2, 0.5), rhyme_scorer(), novelty_scorer(decay=0.5),
+        weights=[2.0, 3.0, 1.0],
+    ),
+)
+ghost = make_constrained_generator(
+    erasure(line_window(3), keep_ratio=0.4),
+    combine_scores(
+        lipogram_scorer("e"), novelty_scorer(), length_scorer(5),
+        weights=[1.0, 0.5, 1.0],
+    ),
+)
+strange = make_constrained_generator(
+    n_plus_7(last_lines(1)),
+    combine_scores(
+        divergence_scorer(0.05, 0.4),
+        alliteration_scorer(),
+        vocabulary_scorer(line_window(5)),
+        weights=[3.0, 1.0, 2.0],
+    ),
+)
+
 
 # Zero-arg generators registered for the CLI.
 GENERATORS: dict[str, GeneratorFn] = {
@@ -516,6 +662,11 @@ GENERATORS: dict[str, GeneratorFn] = {
     "dissolve":    dissolve,
     "vanish":      vanish,
     "drift":       drift,
+    "sparse":      sparse,
+    "dense":       dense,
+    "echo":        echo,
+    "ghost":       ghost,
+    "strange":     strange,
 }
 
 # Parameterized factories: CLI calls these as  name:arg  (e.g. syllables:5).
