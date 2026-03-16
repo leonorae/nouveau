@@ -320,9 +320,15 @@ def corpus() -> None:
 @click.option("--score", "scorer_spec", default="novelty", show_default=True,
               help="Score factory spec (novelty, syllables:7, rhyme, sentiment:0.5, …).")
 @click.option("--n", default=10, show_default=True, help="How many poems to show.")
+@click.option("--worst", is_flag=True, default=False,
+              help="Show highest-scoring poems first (most repetitive, most stuck, etc.).")
 @click.option("--full", is_flag=True, default=False, help="Print full poem text.")
-def corpus_rank(directory: Path, scorer_spec: str, n: int, full: bool) -> None:
-    """Rank poems in a directory by a score factory (lower cost = better fit)."""
+def corpus_rank(directory: Path, scorer_spec: str, n: int, worst: bool, full: bool) -> None:
+    """Rank poems in a directory by a score factory.
+
+    By default shows lowest-cost poems first (best fit for the scorer).
+    Use --worst to surface the highest-cost poems (most looping, most divergent, etc.).
+    """
     make_score = _parse_scorer(scorer_spec)
     poems = _load_corpus(directory)
 
@@ -331,9 +337,10 @@ def corpus_rank(directory: Path, scorer_spec: str, n: int, full: bool) -> None:
         for path, poem in bar:
             cost = score_poem(poem, make_score)
             scored.append((cost, path, poem))
-    scored.sort(key=lambda x: x[0])
+    scored.sort(key=lambda x: x[0], reverse=worst)
 
-    click.echo(f"\n--- top {min(n, len(scored))} by {scorer_spec} (lower = better) ---\n")
+    direction = "highest" if worst else "lowest"
+    click.echo(f"\n--- {min(n, len(scored))} {direction}-scoring by {scorer_spec} ---\n")
     for rank, (cost, path, poem) in enumerate(scored[:n], 1):
         click.echo(f"{rank:>3}.  {cost:.3f}  {path.name}  [{poem.generator_name}]")
         if full:
@@ -349,12 +356,23 @@ def corpus_rank(directory: Path, scorer_spec: str, n: int, full: bool) -> None:
 @click.argument("directory", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--score", "scorer_spec", default="novelty", show_default=True)
 @click.option("--threshold", default=1.0, show_default=True,
-              help="Keep poems with mean cost below this value.")
+              help="Score threshold for filtering.")
+@click.option("--above", is_flag=True, default=False,
+              help="Keep poems ABOVE the threshold (select for repetition, loops, etc.).")
 @click.option("--out", "out_dir", default=None,
               help="Copy survivors to this directory instead of just listing them.")
-def corpus_filter(directory: Path, scorer_spec: str, threshold: float,
+def corpus_filter(directory: Path, scorer_spec: str, threshold: float, above: bool,
                   out_dir: str | None) -> None:
-    """Filter a corpus, keeping poems whose mean score is below a threshold."""
+    """Filter a corpus by a score threshold.
+
+    By default keeps poems whose mean cost is BELOW the threshold (novel, divergent).
+    Use --above to keep poems ABOVE it (repetitive, looping, stuck).
+
+    \b
+    Examples:
+      nouveau corpus filter corpora/dream --score novelty --threshold 5.0
+      nouveau corpus filter corpora/dream --score novelty --threshold 10.0 --above
+    """
     make_score = _parse_scorer(scorer_spec)
     poems = _load_corpus(directory)
 
@@ -362,11 +380,12 @@ def corpus_filter(directory: Path, scorer_spec: str, threshold: float,
     with click.progressbar(poems, label="scoring", width=30) as bar:
         for path, poem in bar:
             cost = score_poem(poem, make_score)
-            if cost < threshold:
+            if (cost > threshold) if above else (cost < threshold):
                 survivors.append((cost, path, poem))
-    survivors.sort(key=lambda x: x[0])
+    survivors.sort(key=lambda x: x[0], reverse=above)
 
-    click.echo(f"\n{len(survivors)}/{len(poems)} poems below threshold {threshold} [{scorer_spec}]\n")
+    direction = "above" if above else "below"
+    click.echo(f"\n{len(survivors)}/{len(poems)} poems {direction} threshold {threshold} [{scorer_spec}]\n")
     for cost, path, poem in survivors:
         click.echo(f"  {cost:.3f}  {path.name}")
 
