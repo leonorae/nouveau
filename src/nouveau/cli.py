@@ -99,6 +99,91 @@ def compose(max_lines: int, generator: str, model_name: str, temperature: float)
 
 
 @cli.command()
+@click.argument("max_lines", type=int)
+@click.argument("generator1", type=str, metavar="GENERATOR1")
+@click.argument("generator2", type=str, metavar="GENERATOR2")
+@click.option("--name1", default="A", show_default=True, help="Name for the first agent.")
+@click.option("--name2", default="B", show_default=True, help="Name for the second agent.")
+@click.option(
+    "--model",
+    "model_name",
+    default=DEFAULT_MODEL,
+    show_default=True,
+    help="HuggingFace model ID or path to a local checkpoint.",
+)
+@click.option(
+    "--temperature",
+    default=0.7,
+    show_default=True,
+    help="Sampling temperature for generation.",
+)
+def duet(
+    max_lines: int,
+    generator1: str,
+    generator2: str,
+    name1: str,
+    name2: str,
+    model_name: str,
+    temperature: float,
+) -> None:
+    """Two AI generators compose a poem together.
+
+    MAX_LINES total lines, alternating between GENERATOR1 and GENERATOR2.
+    After the poem, prints a brief influence report.
+    """
+    if max_lines < 2:
+        raise click.BadParameter("must be at least 2", param_hint="MAX_LINES")
+
+    gen_fn1 = _parse_generator(generator1)
+    gen_fn2 = _parse_generator(generator2)
+
+    click.echo(f"Loading {model_name}...")
+    model = Model(model_name=model_name, temperature=temperature)
+
+    poem = Poem(
+        max_lines=max_lines,
+        generator_name=f"{generator1}|{generator2}",
+        model_name=model_name,
+    )
+
+    pad = max(len(name1), len(name2))
+    click.echo(f"\n{name1:<{pad}}  ({generator1})")
+    click.echo(f"{name2:<{pad}}  ({generator2})")
+    click.echo()
+
+    agents = [(name1, gen_fn1), (name2, gen_fn2)]
+    turn = 0
+    while not poem.is_full():
+        name, gen_fn = agents[turn % 2]
+        line = gen_fn(poem, model)
+        poem.add_line(line, author=name)
+        click.echo(f"{name:<{pad}}  {line}")
+        turn += 1
+
+    path = poem.save()
+    click.echo(f"\nPoem saved to {path}")
+
+    # influence report
+    lines1 = [l for l in poem.lines if l.author == name1]
+    lines2 = [l for l in poem.lines if l.author == name2]
+
+    def vocab(lines):
+        return {w.lower().strip(".,;:!?\"'") for l in lines for w in l.text.split() if w}
+
+    words1, words2 = vocab(lines1), vocab(lines2)
+    if words1 and words2:
+        overlap = words1 & words2
+        jaccard = len(overlap) / len(words1 | words2)
+        shared = ", ".join(sorted(overlap)[:10]) + (" ..." if len(overlap) > 10 else "")
+        avg1 = sum(len(l.text.split()) for l in lines1) / len(lines1)
+        avg2 = sum(len(l.text.split()) for l in lines2) / len(lines2)
+        click.echo(f"\n--- influence ---")
+        click.echo(f"vocabulary overlap  {jaccard:.2f}  ({len(overlap)} shared words)")
+        click.echo(f"shared: {shared}")
+        click.echo(f"avg words/line  {name1}={avg1:.1f}  {name2}={avg2:.1f}")
+
+
+@cli.command()
 @click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 def show(path: Path) -> None:
     """Display a saved poem."""
@@ -106,7 +191,7 @@ def show(path: Path) -> None:
     click.echo(f"{data['generator']} · {data['model']} · {data['created_at']}")
     click.echo()
     for entry in data["lines"]:
-        label = "you" if entry["author"] == "human" else " AI"
+        label = "you" if entry["author"] == "human" else entry["author"]
         click.echo(f"{label}  {entry['text']}")
 
 

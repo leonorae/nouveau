@@ -157,7 +157,90 @@ def test_show_labels_authors(tmp_path):
     runner = CliRunner()
     result = runner.invoke(cli, ["show", str(poem_file)])
     assert "you" in result.output
-    assert " AI" in result.output
+    assert "ai" in result.output
+
+
+def test_show_labels_named_agents(tmp_path):
+    poem_file = tmp_path / "poem.json"
+    poem_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "created_at": "2024-01-01T12:00:00",
+                "model": "gpt2",
+                "generator": "sparse|dense",
+                "lines": [
+                    {"author": "oracle", "text": "the field is white"},
+                    {"author": "engine", "text": "cold iron speaks through stone"},
+                ],
+            }
+        )
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli, ["show", str(poem_file)])
+    assert "oracle" in result.output
+    assert "engine" in result.output
+
+
+def test_duet_help():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["duet", "--help"])
+    assert result.exit_code == 0
+    assert "GENERATOR1" in result.output
+    assert "GENERATOR2" in result.output
+
+
+def test_duet_max_lines_too_small():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["duet", "1", "last", "first"])
+    assert result.exit_code != 0
+
+
+def test_duet_invalid_generator():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["duet", "4", "nonexistent", "last"])
+    assert result.exit_code != 0
+
+
+def test_duet_full_run(fake_model, tmp_path):
+    runner = CliRunner()
+    with patch("nouveau.cli.Model", return_value=fake_model):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(cli, ["duet", "4", "last", "first"])
+    assert result.exit_code == 0, result.output
+    assert "Poem saved to" in result.output
+    assert "influence" in result.output
+
+
+def test_duet_saves_named_authors(fake_model, tmp_path):
+    runner = CliRunner()
+    with patch("nouveau.cli.Model", return_value=fake_model):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            runner.invoke(
+                cli,
+                ["duet", "4", "last", "first", "--name1", "oracle", "--name2", "engine"],
+            )
+            poems = list(Path("poems").glob("*.json"))
+            assert len(poems) == 1
+            data = json.loads(poems[0].read_text())
+    assert data["generator"] == "last|first"
+    authors = {line["author"] for line in data["lines"]}
+    assert authors == {"oracle", "engine"}
+    assert len(data["lines"]) == 4
+
+
+def test_duet_alternates_agents(fake_model, tmp_path):
+    runner = CliRunner()
+    with patch("nouveau.cli.Model", return_value=fake_model):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            runner.invoke(
+                cli,
+                ["duet", "4", "last", "first", "--name1", "A", "--name2", "B"],
+            )
+            poems = list(Path("poems").glob("*.json"))
+            data = json.loads(poems[0].read_text())
+    authors = [line["author"] for line in data["lines"]]
+    assert authors == ["A", "B", "A", "B"]
 
 
 def test_show_missing_file():
