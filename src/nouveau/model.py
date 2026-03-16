@@ -27,7 +27,10 @@ class Model:
             inputs = self.tokenizer(prefix, return_tensors="pt")
         else:
             bos = self.tokenizer.bos_token_id or self.tokenizer.eos_token_id
-            inputs = {"input_ids": torch.tensor([[bos]])}
+            inputs = {
+                "input_ids": torch.tensor([[bos]]),
+                "attention_mask": torch.ones((1, 1), dtype=torch.long),
+            }
         with torch.no_grad():
             output = self.llm.generate(
                 **inputs,
@@ -36,8 +39,6 @@ class Model:
                 do_sample=True,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
-        # decode only the newly generated tokens
         new_tokens = output[0][inputs["input_ids"].shape[1]:]
         text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
-        # trim to first newline so output stays on one line
         return text.split("\n")[0].strip()
