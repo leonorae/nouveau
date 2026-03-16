@@ -1,5 +1,7 @@
 # nouveau — project-specific ignores
 poems/
+corpora/
+machines/
 checkpoint/
 poetry.txt
 
