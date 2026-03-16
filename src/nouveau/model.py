@@ -23,7 +23,11 @@ class Model:
         self.llm.eval()
 
     def generate(self, prefix: str, max_new_tokens: int = 20) -> str:
-        inputs = self.tokenizer(prefix, return_tensors="pt")
+        if prefix:
+            inputs = self.tokenizer(prefix, return_tensors="pt")
+        else:
+            bos = self.tokenizer.bos_token_id or self.tokenizer.eos_token_id
+            inputs = {"input_ids": torch.tensor([[bos]])}
         with torch.no_grad():
             output = self.llm.generate(
                 **inputs,
