@@ -278,6 +278,102 @@ def _lookup_offset(word: str, wordlist: list[str], offset: int) -> str:
     return wordlist[(idx + offset) % len(wordlist)]
 
 
+def reverse_lines(context_fn: ContextFn) -> ContextFn:
+    """Time runs the other way: feed lines in reverse order.
+
+    The model is always trying to arrive somewhere it has already been.
+    Works best with window or line_window; single-line contexts return unchanged.
+    """
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        lines = text.split("\n")
+        return "\n".join(reversed(lines))
+    return _selector
+
+
+def column(context_fn: ContextFn, position: int = -1) -> ContextFn:
+    """Extract one word per line — the vertical spine of the poem.
+
+    position=0: first word of each line (how things begin)
+    position=-1: last word of each line (how things end)
+
+    The model receives a list of isolated words with no surrounding
+    syntax — pure semantic residue, one step removed from language.
+    """
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        spine = []
+        for line in text.split("\n"):
+            words = line.split()
+            if words:
+                spine.append(words[position])
+        return " ".join(spine)
+    return _selector
+
+
+def spiral(context_fn: ContextFn, repeats: int = 3) -> ContextFn:
+    """A thought that repeats and dissolves on each repetition.
+
+    The first echo is intact; each subsequent one loses more words,
+    separated by ' / ' as a breath mark. The model enters through
+    a clear door and exits through fog.
+    """
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        words = text.split()
+        if not words:
+            return text
+        parts = []
+        for i in range(repeats):
+            keep = max(1, int(len(words) * (1.0 - i / repeats)))
+            parts.append(" ".join(words[:keep]))
+        return " / ".join(parts)
+    return _selector
+
+
+def hypnagogic(base_fn: ContextFn, min_keep: float = 0.1) -> ContextFn:
+    """Erasure that deepens as the poem grows — fog accumulates.
+
+    Early in the poem the context is nearly intact. By the final lines,
+    only traces remain. The poem forgets itself as it continues;
+    the model responds to a memory of a memory.
+    """
+    def _selector(poem: "Poem") -> str:
+        progress = len(poem.lines) / max(poem.max_lines, 1)
+        keep_ratio = max(min_keep, 1.0 - progress * 0.9)
+        return erasure(base_fn, keep_ratio=keep_ratio)(poem)
+    return _selector
+
+
+def palimpsest(context_fn: ContextFn, layers: int = 3,
+               seed: int | None = None) -> ContextFn:
+    """Stack erased versions of the context on top of each other.
+
+    Each layer is the same source text, erased to a different density.
+    The model sees the same text through multiple transparencies at once —
+    old writing showing through new, the way parchment holds its ghosts.
+    """
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        words = text.split()
+        if not words:
+            return text
+        rng = random.Random(seed if seed is not None else len(poem))
+        layer_texts = []
+        for i in range(layers):
+            keep_ratio = (i + 1) / layers
+            kept = [w if rng.random() < keep_ratio else "..." for w in words]
+            # collapse gaps
+            result = []
+            for w in kept:
+                if w == "..." and result and result[-1] == "...":
+                    continue
+                result.append(w)
+            layer_texts.append(" ".join(result))
+        return "\n".join(layer_texts)
+    return _selector
+
+
 def markov_chain(context_fn: ContextFn, order: int = 2,
                  seed: int | None = None) -> ContextFn:
     """Build a Markov chain from the poem text and generate from it.
@@ -642,6 +738,29 @@ strange = make_constrained_generator(
     ),
 )
 
+# dream generators — temporal distortion, self-dissolution, recursive echo
+
+# time runs backward — the model always approaches where it's already been
+reverie  = make_generator(reverse_lines(line_window(3)))
+
+# only the last word of each line — endpoints become the whole sentence
+spine    = make_generator(column(line_window(5), position=-1))
+
+# a phrase that repeats and loses words like a thought at the edge of sleep
+trance   = make_generator(spiral(last_lines(1), repeats=4))
+
+# fog accumulates — context dissolves as the poem grows longer
+fugue    = make_generator(hypnagogic(line_window(5)))
+
+# the same text seen through multiple transparencies at once
+palimps  = make_generator(palimpsest(line_window(3), layers=3))
+
+# spiral context + novelty pressure: the model escapes the loop or repeats forever
+lucid    = make_constrained_generator(
+    spiral(last_lines(1), repeats=3),
+    combine_scores(novelty_scorer(decay=0.9), length_scorer(6)),
+)
+
 
 # Zero-arg generators registered for the CLI.
 GENERATORS: dict[str, GeneratorFn] = {
@@ -667,6 +786,12 @@ GENERATORS: dict[str, GeneratorFn] = {
     "echo":        echo,
     "ghost":       ghost,
     "strange":     strange,
+    "reverie":     reverie,
+    "spine":       spine,
+    "trance":      trance,
+    "fugue":       fugue,
+    "palimps":     palimps,
+    "lucid":       lucid,
 }
 
 # Parameterized factories: CLI calls these as  name:arg  (e.g. syllables:5).
