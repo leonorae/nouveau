@@ -47,9 +47,24 @@ class Poem:
             "lines": [{"author": line.author, "text": line.text} for line in self.lines],
         }
 
-    def save(self) -> Path:
-        POEM_DIR.mkdir(exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-        path = POEM_DIR / f"{timestamp}.json"
+    def save(self, out_dir: Path | None = None) -> Path:
+        directory = out_dir if out_dir is not None else POEM_DIR
+        directory.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")
+        path = directory / f"{timestamp}.json"
         path.write_text(json.dumps(self.to_dict(), indent=2))
         return path
+
+    @classmethod
+    def load(cls, path: Path) -> "Poem":
+        data = json.loads(path.read_text())
+        poem = cls(
+            max_lines=len(data["lines"]),
+            generator_name=data.get("generator", "unknown"),
+            model_name=data.get("model", "unknown"),
+            created_at=data.get("created_at", ""),
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
+        )
+        for entry in data["lines"]:
+            poem.lines.append(Line(author=entry["author"], text=entry["text"]))
+        return poem

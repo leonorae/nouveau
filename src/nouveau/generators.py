@@ -604,6 +604,30 @@ def novelty_scorer(decay: float = 0.8) -> ScoreFactory:
     return make_score
 
 
+def score_poem(poem: "Poem", make_score: ScoreFactory) -> float:
+    """Retrospectively score a completed poem line by line.
+
+    For each line at position i, score it using the preceding poem state
+    (lines 0..i-1) as context, exactly as the generator would have seen it.
+    Returns the mean cost across all lines (lower = better fit for the constraint).
+
+    This lets score factories designed for inference-time selection be applied
+    to completed poems in a corpus — same interface, new caller.
+    """
+    if not poem.lines:
+        return 0.0
+    import copy
+    costs = []
+    # build a minimal Poem-like stub for context
+    stub = copy.copy(poem)
+    stub.lines = []
+    for line in poem.lines:
+        scorer = make_score(stub)
+        costs.append(scorer(line.text))
+        stub.lines = stub.lines + [line]
+    return sum(costs) / len(costs)
+
+
 def length_scorer(target_words: int) -> ScoreFactory:
     """Cost = absolute distance from target word count."""
     return lambda poem: lambda text: abs(len(text.split()) - target_words)
