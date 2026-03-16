@@ -22,15 +22,15 @@ class Model:
         self.llm = GPT2LMHeadModel.from_pretrained(path)
         self.llm.eval()
 
-    def generate(self, prefix: str, max_new_tokens: int = 20) -> str:
+    def generate(self, prefix: str, max_new_tokens: int = 20, mask: bool = True) -> str:
         if prefix:
             inputs = self.tokenizer(prefix, return_tensors="pt")
         else:
             bos = self.tokenizer.bos_token_id or self.tokenizer.eos_token_id
-            inputs = {
-                "input_ids": torch.tensor([[bos]]),
-                "attention_mask": torch.ones((1, 1), dtype=torch.long),
-            }
+            ids = torch.tensor([[bos]])
+            inputs = {"input_ids": ids}
+            if mask:
+                inputs["attention_mask"] = torch.ones((1, 1), dtype=torch.long)
         with torch.no_grad():
             output = self.llm.generate(
                 **inputs,
