@@ -311,12 +311,15 @@ def column(context_fn: ContextFn, position: int = -1) -> ContextFn:
     return _selector
 
 
-def spiral(context_fn: ContextFn, repeats: int = 3) -> ContextFn:
+def spiral(context_fn: ContextFn, repeats: int = 3,
+           separator: str = " / ") -> ContextFn:
     """A thought that repeats and dissolves on each repetition.
 
-    The first echo is intact; each subsequent one loses more words,
-    separated by ' / ' as a breath mark. The model enters through
-    a clear door and exits through fog.
+    The first echo is intact; each subsequent one loses more words.
+    separator controls how echoes are joined: ' / ' (default) reads as
+    one continuous breath; '\n' presents each echo as its own line,
+    which helps the model generate fresh continuations instead of
+    looping on the separator token.
     """
     def _selector(poem: "Poem") -> str:
         text = context_fn(poem)
@@ -327,7 +330,26 @@ def spiral(context_fn: ContextFn, repeats: int = 3) -> ContextFn:
         for i in range(repeats):
             keep = max(1, int(len(words) * (1.0 - i / repeats)))
             parts.append(" ".join(words[:keep]))
-        return " / ".join(parts)
+        return separator.join(parts)
+    return _selector
+
+
+def umbra(context_fn: ContextFn) -> ContextFn:
+    """Mirror the word order within each line — the shadow of the text.
+
+    Each line's words are reversed in place, but line order is preserved.
+    The model sees a syntactically strange version of recent content:
+    familiar words in uncanny positions. Not erasure, not shuffle —
+    the exact same words, reflected. Useful for disrupting GPT-2's
+    tendency to continue familiar phrase patterns.
+    """
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        return "\n".join(
+            " ".join(reversed(line.split()))
+            for line in text.split("\n")
+            if line.strip()
+        )
     return _selector
 
 
@@ -773,6 +795,14 @@ spine    = make_generator(column(line_window(5), position=-1))
 # a phrase that repeats and loses words like a thought at the edge of sleep
 trance   = make_generator(spiral(last_lines(1), repeats=4))
 
+# trance but with newline-separated echoes: each decay step lands on its own line,
+# so the model sees distinct lines rather than a slash-separated mantra
+tide     = make_generator(spiral(last_lines(1), repeats=3, separator="\n"))
+
+# umbra: feed the model a word-mirrored version of recent lines —
+# familiar vocabulary in backwards syntax, disrupting familiar continuations
+mirror   = make_generator(umbra(line_window(2)))
+
 # fog accumulates — context dissolves as the poem grows longer
 fugue    = make_generator(hypnagogic(line_window(5)))
 
@@ -816,6 +846,8 @@ GENERATORS: dict[str, GeneratorFn] = {
     "fugue":       fugue,
     "palimps":     palimps,
     "lucid":       lucid,
+    "tide":        tide,
+    "mirror":      mirror,
 }
 
 # Parameterized factories: CLI calls these as  name:arg  (e.g. syllables:5).
