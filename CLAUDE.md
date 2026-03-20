@@ -4,7 +4,7 @@ Context for AI assistants working on this project.
 
 ## What this project is
 
-**nouveau** is a collaborative poetry environment. The current form is a CLI where a human types a line and an AI generates the next, alternating until the poem reaches a target length. Finished poems are saved with metadata.
+**nouveau** is a tool for human-AI collaborative poetry. A human or AI agent types some unit of poetry, something else (another model or simple generator) is selected to respond, and on it goes. Finished poems are saved with metadata.
 
 The direction it's heading: LLMs as first-class participants — not just backends, but poets, directors, and trainers. Humans can direct LLMs, LLMs can direct other LLMs, and poem sessions can feed back into model weights via RL. The codebase itself is fair game for AI collaborators to read, extend, and edit. Recursive and experimental is fine here.
 
