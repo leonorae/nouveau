@@ -22,8 +22,15 @@ class Model:
         self.llm = GPT2LMHeadModel.from_pretrained(path)
         self.llm.eval()
 
-    def generate(self, prefix: str, max_new_tokens: int = 20) -> str:
-        inputs = self.tokenizer(prefix, return_tensors="pt")
+    def generate(self, prefix: str, max_new_tokens: int = 20, mask: bool = True) -> str:
+        if prefix:
+            inputs = self.tokenizer(prefix, return_tensors="pt")
+        else:
+            bos = self.tokenizer.bos_token_id or self.tokenizer.eos_token_id
+            ids = torch.tensor([[bos]])
+            inputs = {"input_ids": ids}
+            if mask:
+                inputs["attention_mask"] = torch.ones((1, 1), dtype=torch.long)
         with torch.no_grad():
             output = self.llm.generate(
                 **inputs,
@@ -32,8 +39,6 @@ class Model:
                 do_sample=True,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
-        # decode only the newly generated tokens
         new_tokens = output[0][inputs["input_ids"].shape[1]:]
         text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
-        # trim to first newline so output stays on one line
         return text.split("\n")[0].strip()

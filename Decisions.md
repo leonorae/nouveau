@@ -161,6 +161,70 @@ Use `click` for the CLI. It is lightweight, well-documented, and produces good h
 
 ---
 
+## ADR-009: Generator extensibility — two-layer ContextFn/GeneratorFn architecture
+
+**Status:** Decided
+
+**Context:**
+The original generators were monolithic functions: selection logic (which lines to use) and model invocation were fused into a single callable. The `gpt_` prefix on every name hardcoded the model backend into the strategy name, which is a category error — the strategies are model-agnostic. `gpt_window` also hardcoded its window size at module level, making any variation require a full copy-paste.
+
+**Decision:**
+Split generation into two composable layers:
+
+```
+ContextFn   = (Poem) -> str        # what text to extract from the poem
+GeneratorFn = (Poem, Model) -> str # model call that produces a new line
+```
+
+`make_generator(context_fn)` bridges the two. `make_conditional(condition, if_true, if_false)` composes generators with state-dependent dispatch.
+
+Context selectors are factory functions that operate at any granularity:
+
+```python
+# Line-level
+last_lines(n)                   # last n lines
+first_lines(n)                  # first n lines
+line_window(int | list[int] | slice)  # arbitrary line selection
+
+# Word-level
+last_words(n)                   # last n words across all lines
+first_words(n)                  # first n words across all lines
+```
+
+Named instances (registered in `GENERATORS`):
+
+```python
+last        = make_generator(last_lines(1))
+first       = make_generator(first_lines(1))
+window      = make_generator(line_window(3))
+bookend     = make_generator(line_window([0, -1]))
+alternating = make_generator(line_window(slice(None, None, 2)))
+closure     = make_conditional(lambda poem: len(poem) == poem.max_lines - 1,
+                               if_true=first, if_false=last)
+```
+
+The `gpt_` prefix is dropped throughout. Names reflect selection strategy, not backend.
+
+**Design principle:**
+Every generator is either a `make_generator(context_fn)` call or a `make_conditional` composition. New strategies are new `ContextFn` factories — they don't touch the model call path. This keeps the `GENERATORS` dict uniform and allows future callers (CLI flags, config files, composition layers) to parameterise strategies without touching internals.
+
+**Planned generators (not yet registered — architecture notes in generators.py):**
+
+- `rhyme` — `context_fn: last_lines(1)`; needs `model.generate()` to accept `bias_toward` (logit biases or constrained suffix) computed from phoneme candidates via pronouncing/cmudict.
+- `syllable` — any `context_fn`; needs a syllable counter (pyphen/cmudict) and either a post-processing pass or a rejection-sampler loop around `model.generate()`.
+- `sentiment_arc` — any `context_fn`; needs `sentiment_target: float` on `model.generate()`; score candidates with vader/textblob, re-sample or rank beams. Natural arc: neutral → tension → quiet resolution.
+
+**Ruled out:**
+- *Class-based strategy pattern* — still overly formal; `ContextFn` factories give the same composability with less ceremony.
+- *Encoding selectors as CLI strings* (e.g. `"0,-1"`) — too fragile; `LineSelector` stays a Python type and named presets are exposed in `GENERATORS`.
+
+**Consequences:**
+- All generator names changed (`gpt_last` → `last`, etc.). Existing saved poem JSON files record the old names as metadata strings; the `show` and `list` commands display whatever is stored, so old files remain readable.
+- Adding a word-level generator is a new `ContextFn` factory + one line in `GENERATORS`.
+- More complex strategies (rhyme, syllable, sentiment) require `model.py` to grow a richer interface; the architecture is already shaped to receive them.
+
+---
+
 ## ADR-008: Deferred technology notes
 
 **Status:** Parked — not a current decision, recorded so the ideas aren't lost.
@@ -176,3 +240,40 @@ Ruled out for now: we're fine-tuning locally, training tooling is Python-first, 
 The generator strategy pattern and the constraint/sampling pipeline are naturally functional in character. A Lisp or ML-family language (OCaml, Clojure, etc.) would express composable constraint stacks and higher-order generator strategies more elegantly than Python. The idea isn't dismissed — there may be a place for a small Lisp-shaped DSL at the composition layer if the agent-interaction surface grows complex enough to warrant it.
 
 Ruled out for now: agents are the primary surface interacting with this code, and Python maximizes agent legibility and modifiability. Starting with a Lisp layer adds friction before the composition model is even settled.
+
+---
+
+## ADR-010: Context transformers — computational poetry techniques
+
+**Status:** Decided
+
+**Context:**
+The generator architecture separates context selection (`ContextFn`) from model invocation (`GeneratorFn`). This creates a natural insertion point for text transformation: functions of type `ContextFn -> ContextFn` that reshape text between selection and model input. Several traditions of computational and constrained poetry map directly onto this pattern.
+
+**Decision:**
+Implement five context transformers inspired by Oulipo, Burroughs, and erasure poetry:
+
+- `cut_up(context_fn, seed)` — Burroughs cut-up: shuffle words from context into new order
+- `fold_in(fn_a, fn_b)` — Burroughs fold-in: interleave words from two context sources
+- `erasure(context_fn, keep_ratio, seed)` — erasure poetry: randomly remove words, collapse gaps to `...`
+- `n_plus_7(context_fn, wordlist, offset)` — Oulipo N+7: replace content words with words N positions later in a dictionary
+- `markov_chain(context_fn, order, seed)` — build a Markov chain from poem text and sample from it
+
+These compose with existing context selectors (`last_lines`, `line_window`, etc.) and with each other: `erasure(n_plus_7(line_window(3)))` is a valid pipeline. Named instances registered in `GENERATORS`: `cutup`, `erased`, `folded`, `markov`, `oulipo`, `dissolve` (erasure + n_plus_7 composition).
+
+**Design principles:**
+- Transformers are pure functions on text. No model calls, no side effects.
+- Seeded randomness (defaulting to poem length) for reproducibility in tests.
+- N+7 uses a curated poetic wordlist (120 words: natural phenomena, body, architecture, music, weaponry) rather than requiring NLTK or a system dictionary.
+- Function words are preserved by N+7 to maintain syntactic structure.
+- Everything is stdlib-only — no new dependencies.
+
+**Ruled out:**
+- *NLTK POS tagging for N+7* — too heavy for a heuristic that works well enough. The function-word filter catches most cases.
+- *Character-level transformers* — interesting but the model tokenizer operates on words/subwords; character shuffling produces gibberish inputs.
+- *Deterministic erasure patterns (every Nth word)* — less interesting than random; the gaps should feel organic.
+
+**Consequences:**
+- The transformer layer is a new compositional axis: any `ContextFn` can be wrapped by any transformer, and transformers compose with each other.
+- The `dissolve` generator (erasure + n_plus_7) demonstrates multi-technique composition as a first-class pattern.
+- Parameterized CLI factories (`erasure:0.3`, `nplus:7`, `markov:2`) let users experiment from the command line.
