@@ -461,6 +461,14 @@ def _end_sound(word: str, n: int = 3) -> str:
     word = word.lower().rstrip(".,!?;:'\"")
     return word[-n:] if len(word) >= n else word
 
+        # build transition tables at all orders for backoff
+        tables: list[dict[tuple[str, ...], list[str]]] = []
+        for o in range(1, order + 1):
+            t: dict[tuple[str, ...], list[str]] = defaultdict(list)
+            for i in range(len(words) - o):
+                key = tuple(words[i:i + o])
+                t[key].append(words[i + o])
+            tables.append(t)
 
 def count_syllables(text: str) -> int:
     """Approximate syllable count by counting vowel-sound clusters.
@@ -507,6 +515,11 @@ def combine_scores(
         return lambda text: sum(s(text) * w for s, w in zip(scorers, ws))
     return make_score
 
+    Rough heuristic (silent e, diphthongs, etc. are ignored). pyphen or
+    cmudict give more accurate results when precision matters.
+    """
+    count = len(re.findall(r"[aeiouy]+", text.lower()))
+    return max(1, count)
 
 # ---------------------------------------------------------------------------
 # Score factories
