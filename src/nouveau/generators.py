@@ -367,6 +367,60 @@ def hypnagogic(base_fn: ContextFn, min_keep: float = 0.1) -> ContextFn:
     return _selector
 
 
+def denoise(base_fn: ContextFn, max_keep: float = 1.0) -> ContextFn:
+    """Diffusion-inspired reverse of hypnagogic: the poem clears as it progresses.
+
+    Early turns receive a heavily masked context (maximum noise). As the poem
+    grows, the mask lifts — by the final lines the context is nearly intact.
+    The poem denoises itself into existence; early lines are written almost
+    blind and each turn is conditioned on a slightly more legible past.
+
+    max_keep caps the final keep_ratio so the context never fully clears
+    (useful for keeping some strangeness in later lines).
+    """
+    def _selector(poem: "Poem") -> str:
+        progress = len(poem.lines) / max(poem.max_lines, 1)
+        keep_ratio = min(max_keep, 0.1 + progress * 0.9)
+        return erasure(base_fn, keep_ratio=keep_ratio)(poem)
+    return _selector
+
+
+def stencil(context_fn: ContextFn, pattern: list[bool] | None = None) -> ContextFn:
+    """Mask words by a repeating boolean pattern — structured holes, not noise.
+
+    Diffusion uses fixed masks during training; this is the poetic equivalent:
+    the model always sees the same *positions* removed, not a random sample.
+
+    pattern is a list of bools that tiles across the word list:
+      [True, False]          — every other word (alternating keep/drop)
+      [True, True, False]    — keep two, drop one, repeat
+      [False, True, False]   — only middle word of each triple survives
+
+    Defaults to [True, False] (every other word).
+    Missing words are replaced with '...' (collapsed as in erasure).
+
+    Because the mask is deterministic (no rng), the same poem state always
+    produces the same context — useful when you want reproducible structure
+    rather than the stochastic texture of erasure.
+    """
+    _pattern = pattern if pattern is not None else [True, False]
+
+    def _selector(poem: "Poem") -> str:
+        text = context_fn(poem)
+        words = text.split()
+        if not words:
+            return text
+        masked = [w if _pattern[i % len(_pattern)] else "..." for i, w in enumerate(words)]
+        # collapse consecutive gaps
+        result: list[str] = []
+        for w in masked:
+            if w == "..." and result and result[-1] == "...":
+                continue
+            result.append(w)
+        return " ".join(result)
+    return _selector
+
+
 def palimpsest(context_fn: ContextFn, layers: int = 3,
                seed: int | None = None) -> ContextFn:
     """Stack erased versions of the context on top of each other.
@@ -879,6 +933,15 @@ fugue    = make_generator(hypnagogic(line_window(5)))
 # the same text seen through multiple transparencies at once
 palimps  = make_generator(palimpsest(line_window(3), layers=3))
 
+# diffusion-inspired: context clears as the poem progresses (reverse hypnagogic)
+develop  = make_generator(denoise(line_window(5)))
+
+# every other word masked — the model reads a skeleton and fills the flesh
+lattice  = make_generator(stencil(line_window(3), pattern=[True, False]))
+
+# keep one word in three — sparser than lattice, more like a telegram from the poem
+sparse_mask = make_generator(stencil(line_window(3), pattern=[True, False, False]))
+
 # spiral context + novelty pressure: the model escapes the loop or repeats forever
 lucid    = make_constrained_generator(
     spiral(last_lines(1), repeats=3),
@@ -922,6 +985,9 @@ GENERATORS: dict[str, GeneratorFn] = {
     "tide":        tide,
     "mirror":      mirror,
     "tense":       tense,
+    "develop":     develop,
+    "lattice":     lattice,
+    "sparse_mask": sparse_mask,
 }
 
 # Parameterized factories: CLI calls these as  name:arg  (e.g. syllables:5).
