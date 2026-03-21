@@ -205,6 +205,10 @@ def show(path: Path) -> None:
 @click.option("--name2", default="B", show_default=True, help="Author name for second generator.")
 @click.option("--model", "model_name", default=DEFAULT_MODEL, show_default=True)
 @click.option("--temperature", default=0.9, show_default=True)
+@click.option("--seed", "seed_path", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="Seed each poem with the last lines of an existing poem file.")
+@click.option("--seed-lines", default=2, show_default=True,
+              help="How many trailing lines to import from --seed.")
 def run(
     generator1: str,
     generator2: str | None,
@@ -215,6 +219,8 @@ def run(
     name2: str,
     model_name: str,
     temperature: float,
+    seed_path: str | None,
+    seed_lines: int,
 ) -> None:
     """Run a generator headlessly N times, saving poems to a corpus directory.
 
@@ -225,6 +231,7 @@ def run(
     Examples:
       nouveau run fugue --n 20 --out corpora/dream
       nouveau run trance spine --n 10 --lines 14 --out corpora/cross
+      nouveau run mirror --seed poems/old.json --seed-lines 2 --out corpora/seeded
     """
     if lines < 2:
         raise click.BadParameter("must be at least 2", param_hint="--lines")
@@ -236,12 +243,23 @@ def run(
     out_path = Path(out_dir) if out_dir else POEM_DIR
     gen_label = f"{generator1}|{generator2}" if generator2 else generator1
 
+    seed_poem: Poem | None = None
+    if seed_path:
+        seed_poem = Poem.load(Path(seed_path))
+
     click.echo(f"Loading {model_name}...")
     model = Model(model_name=model_name, temperature=temperature)
     click.echo(f"Running {n} × {lines}-line [{gen_label}] → {out_path}/\n")
 
     for i in range(n):
-        poem = Poem(max_lines=lines, generator_name=gen_label, model_name=model_name)
+        seed_count = 0
+        if seed_poem:
+            seed_tail = seed_poem.lines[-seed_lines:]
+            seed_count = len(seed_tail)
+        poem = Poem(max_lines=lines + seed_count, generator_name=gen_label, model_name=model_name)
+        if seed_poem:
+            for sl in seed_tail:
+                poem.lines.append(sl)
         agents = [(name1, gen_fn1), (author2, gen_fn2)]
         turn = 0
         while not poem.is_full():
@@ -250,8 +268,9 @@ def run(
             poem.add_line(line, author=name)
             turn += 1
         path = poem.save(out_path)
-        # print first line as a preview
-        preview = poem.lines[0].text[:60] + ("…" if len(poem.lines[0].text) > 60 else "")
+        # preview: first non-seed line
+        first_new = poem.lines[seed_count] if seed_count < len(poem.lines) else poem.lines[0]
+        preview = first_new.text[:60] + ("…" if len(first_new.text) > 60 else "")
         click.echo(f'  [{i+1:>3}/{n}] {path.name}  \u201c{preview}\u201d')
 
     click.echo(f"\nDone. {n} poems saved to {out_path}/")

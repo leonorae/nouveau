@@ -461,6 +461,14 @@ def _end_sound(word: str, n: int = 3) -> str:
     word = word.lower().rstrip(".,!?;:'\"")
     return word[-n:] if len(word) >= n else word
 
+        # build transition tables at all orders for backoff
+        tables: list[dict[tuple[str, ...], list[str]]] = []
+        for o in range(1, order + 1):
+            t: dict[tuple[str, ...], list[str]] = defaultdict(list)
+            for i in range(len(words) - o):
+                key = tuple(words[i:i + o])
+                t[key].append(words[i + o])
+            tables.append(t)
 
 def count_syllables(text: str) -> int:
     """Approximate syllable count by counting vowel-sound clusters.
@@ -507,6 +515,11 @@ def combine_scores(
         return lambda text: sum(s(text) * w for s, w in zip(scorers, ws))
     return make_score
 
+    Rough heuristic (silent e, diphthongs, etc. are ignored). pyphen or
+    cmudict give more accurate results when precision matters.
+    """
+    count = len(re.findall(r"[aeiouy]+", text.lower()))
+    return max(1, count)
 
 # ---------------------------------------------------------------------------
 # Score factories
@@ -648,6 +661,63 @@ def score_poem(poem: "Poem", make_score: ScoreFactory) -> float:
         costs.append(scorer(line.text))
         stub.lines = stub.lines + [line]
     return sum(costs) / len(costs)
+
+
+def tension_scorer(
+    sentiment_weight: float = 2.0,
+    length_weight: float = 1.0,
+    interrupt_weight: float = 0.5,
+) -> ScoreFactory:
+    """Reward candidates that maximize poetic tension.
+
+    Three signals (all negative cost = reward, so lower = more tension):
+
+    - Sentiment reversal: the greater the swing from the previous line's
+      VADER compound score, the lower the cost. A hopeful line followed by
+      a bleak one scores well; two lines in the same register score poorly.
+
+    - Length contrast: candidate word count diverges from the poem's running
+      average. A two-word line after long ones, or a flooding line after
+      brevity, reads as rupture.
+
+    - Syntactic interruption: commas, dashes, and semicolons mid-line create
+      held breath and suspension. More interrupts per word = lower cost.
+
+    Weights are tunable. Combine with formal constraints via combine_scores():
+        combine_scores(tension_scorer(), syllable_scorer(7))
+    """
+    def make_score(poem: "Poem") -> Callable[[str], float]:
+        analyzer = _get_sentiment_analyzer()
+
+        prev_sentiment = 0.0
+        if poem.lines:
+            prev_sentiment = analyzer.polarity_scores(poem[-1])["compound"]
+
+        avg_words = 0.0
+        if poem.lines:
+            avg_words = sum(len(ln.text.split()) for ln in poem.lines) / len(poem.lines)
+
+        def score(text: str) -> float:
+            words = text.split()
+            n_words = max(len(words), 1)
+            cost = 0.0
+
+            # sentiment reversal: |current - prev| in [0, 2]; reward the swing
+            current_sentiment = analyzer.polarity_scores(text)["compound"]
+            cost -= abs(current_sentiment - prev_sentiment) * sentiment_weight
+
+            # length contrast: normalized divergence from running average
+            if avg_words > 0:
+                cost -= min(1.0, abs(n_words - avg_words) / avg_words) * length_weight
+
+            # syntactic interruption: commas, semicolons, em/en dashes
+            interrupts = sum(text.count(c) for c in (",", ";", "—", "–", " - "))
+            cost -= (interrupts / n_words) * interrupt_weight
+
+            return cost
+
+        return score
+    return make_score
 
 
 def length_scorer(target_words: int) -> ScoreFactory:
@@ -815,6 +885,9 @@ lucid    = make_constrained_generator(
     combine_scores(novelty_scorer(decay=0.9), length_scorer(6)),
 )
 
+# tension: sentiment reversal + length rupture + syntactic interruption
+tense    = make_constrained_generator(last_lines(1), tension_scorer())
+
 
 # Zero-arg generators registered for the CLI.
 GENERATORS: dict[str, GeneratorFn] = {
@@ -848,6 +921,7 @@ GENERATORS: dict[str, GeneratorFn] = {
     "lucid":       lucid,
     "tide":        tide,
     "mirror":      mirror,
+    "tense":       tense,
 }
 
 # Parameterized factories: CLI calls these as  name:arg  (e.g. syllables:5).
@@ -877,5 +951,9 @@ GENERATOR_FACTORIES: dict[str, Callable[[str], GeneratorFn]] = {
     ),
     "lipogram": lambda arg: make_generator(
         lipogram(last_lines(1), banned=arg),
+    ),
+    "tension": lambda arg: make_constrained_generator(
+        last_lines(1),
+        tension_scorer(sentiment_weight=float(arg)),
     ),
 }
