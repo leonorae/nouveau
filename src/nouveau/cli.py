@@ -309,6 +309,7 @@ def _parse_scorer(spec: str):
     from nouveau.generators import (
         novelty_scorer, syllable_scorer, rhyme_scorer, sentiment_scorer,
         divergence_scorer, length_scorer, alliteration_scorer, consonance_scorer,
+        tension_scorer, lipogram_scorer,
     )
     _factories = {
         "novelty":      lambda a: novelty_scorer(float(a)) if a else novelty_scorer(),
@@ -319,6 +320,8 @@ def _parse_scorer(spec: str):
         "length":       lambda a: length_scorer(int(a)),
         "alliteration": lambda a: alliteration_scorer(),
         "consonance":   lambda a: consonance_scorer(float(a)) if a else consonance_scorer(),
+        "tension":      lambda a: tension_scorer(),
+        "lipogram":     lambda a: lipogram_scorer(a) if a else lipogram_scorer(),
     }
     name, _, arg = spec.partition(":")
     if name not in _factories:
