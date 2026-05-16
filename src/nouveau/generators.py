@@ -6,9 +6,10 @@ Two-layer architecture:
   GeneratorFn = (Poem, Model) -> str # model call that produces a new line
 
 Combinators:
-  make_generator(context_fn)                          # basic bridge
-  make_conditional(condition, if_true, if_false)      # state-dependent dispatch
-  make_constrained_generator(context_fn, make_score)  # rejection-sample by cost
+  make_generator(context_fn)                                  # basic bridge
+  make_conditional(condition, if_true, if_false)              # state-dependent dispatch
+  make_constrained_generator(context_fn, make_score)          # rejection-sample by cost
+  make_threshold_switcher(primary, fallback, make_score, …)   # score-triggered generator swap
 
 Score factories produce a (Poem) -> (str) -> float cost function that
 make_constrained_generator uses to pick the best of n_candidates outputs.
@@ -77,10 +78,39 @@ def make_constrained_generator(
         return min(candidates, key=score)
     return _generator
 
+def make_threshold_switcher(
+    primary: GeneratorFn,
+    fallback: GeneratorFn,
+    make_score: ScoreFactory,
+    threshold: float = 0.7,
+    window: int = 3,
+) -> GeneratorFn:
+    """Switch from primary to fallback when the poem exceeds a repetition threshold.
 
-# ---------------------------------------------------------------------------
-# Line-level context selectors
-# ---------------------------------------------------------------------------
+    make_score(poem)(text) is evaluated for each new line against the poem so
+    far. When the rolling mean cost over the last `window` lines exceeds
+    `threshold`, fallback is used for that turn instead of primary.
+
+    Useful for detecting loops (high novelty cost = repeated vocabulary) and
+    routing them to a generator with divergence pressure.
+    """
+    recent_costs: list[float] = []
+
+    def _generator(poem: "Poem", model: "Model") -> str:
+        score = make_score(poem)
+        if poem.lines:
+            cost = score(poem.lines[-1].text)
+            recent_costs.append(cost)
+            if len(recent_costs) > window:
+                recent_costs.pop(0)
+
+        rolling = sum(recent_costs) / len(recent_costs) if recent_costs else 0.0
+        gen = fallback if rolling > threshold else primary
+        return gen(poem, model)
+
+    return _generator
+
+
 
 def last_lines(n: int = 1) -> ContextFn:
     """Select the last n lines of the poem."""
@@ -938,6 +968,14 @@ lucid    = make_constrained_generator(
 # tension: sentiment reversal + length rupture + syntactic interruption
 tense    = make_constrained_generator(last_lines(1), tension_scorer())
 
+# director-assisted: mirror until the poem loops, then strange kicks it free
+rescue = make_threshold_switcher(
+    mirror, strange,
+    novelty_scorer(),
+    threshold=0.7,
+    window=3,
+)
+
 
 # Zero-arg generators registered for the CLI.
 GENERATORS: dict[str, GeneratorFn] = {
@@ -972,6 +1010,7 @@ GENERATORS: dict[str, GeneratorFn] = {
     "tide":        tide,
     "mirror":      mirror,
     "tense":       tense,
+    "rescue":      rescue,
     "develop":     develop,
     "lattice":     lattice,
     "sparse_mask": sparse_mask,
