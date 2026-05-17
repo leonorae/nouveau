@@ -860,6 +860,12 @@ def vocabulary_scorer(corpus_fn: ContextFn) -> ScoreFactory:
     return make_score
 
 
+def _sonic_scorers():
+    """Lazy import of musical score factories to avoid circular imports."""
+    from nouveau.sonify import pitch_entropy_scorer, rest_density_scorer, pitch_range_scorer
+    return pitch_entropy_scorer, rest_density_scorer, pitch_range_scorer
+
+
 # ---------------------------------------------------------------------------
 # Named generator instances
 # ---------------------------------------------------------------------------

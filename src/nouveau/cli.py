@@ -311,17 +311,21 @@ def _parse_scorer(spec: str):
         divergence_scorer, length_scorer, alliteration_scorer, consonance_scorer,
         tension_scorer, lipogram_scorer,
     )
+    from nouveau.sonify import pitch_entropy_scorer, rest_density_scorer, pitch_range_scorer
     _factories = {
-        "novelty":      lambda a: novelty_scorer(float(a)) if a else novelty_scorer(),
-        "syllables":    lambda a: syllable_scorer(int(a)),
-        "rhyme":        lambda a: rhyme_scorer(int(a)) if a else rhyme_scorer(),
-        "sentiment":    lambda a: sentiment_scorer(float(a)),
-        "divergence":   lambda a: divergence_scorer(),
-        "length":       lambda a: length_scorer(int(a)),
-        "alliteration": lambda a: alliteration_scorer(),
-        "consonance":   lambda a: consonance_scorer(float(a)) if a else consonance_scorer(),
-        "tension":      lambda a: tension_scorer(),
-        "lipogram":     lambda a: lipogram_scorer(a) if a else lipogram_scorer(),
+        "novelty":       lambda a: novelty_scorer(float(a)) if a else novelty_scorer(),
+        "syllables":     lambda a: syllable_scorer(int(a)),
+        "rhyme":         lambda a: rhyme_scorer(int(a)) if a else rhyme_scorer(),
+        "sentiment":     lambda a: sentiment_scorer(float(a)),
+        "divergence":    lambda a: divergence_scorer(),
+        "length":        lambda a: length_scorer(int(a)),
+        "alliteration":  lambda a: alliteration_scorer(),
+        "consonance":    lambda a: consonance_scorer(float(a)) if a else consonance_scorer(),
+        "tension":       lambda a: tension_scorer(),
+        "lipogram":      lambda a: lipogram_scorer(a) if a else lipogram_scorer(),
+        "pitch_entropy": lambda a: pitch_entropy_scorer(),
+        "rest_density":  lambda a: rest_density_scorer(float(a)) if a else rest_density_scorer(),
+        "pitch_range":   lambda a: pitch_range_scorer(int(a)) if a else pitch_range_scorer(),
     }
     name, _, arg = spec.partition(":")
     if name not in _factories:
@@ -430,6 +434,98 @@ def corpus_show(path: Path) -> None:
     click.echo()
     for line in poem.lines:
         click.echo(f"  {line.author:<10} {line.text}")
+
+
+@corpus.command("sonify")
+@click.argument("directory", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--map", "mapping", default="vowel", show_default=True,
+              help=f"Mapping strategy. choices: vowel sentiment length arc ascending descending wave interval")
+@click.option("--scale", default="minor_pentatonic", show_default=True,
+              help=f"Scale. choices: {' '.join(['minor_pentatonic','major_pentatonic','whole_tone','chromatic','blues','diminished','major','minor'])}")
+@click.option("--root", default="A3", show_default=True, help="Root note (e.g. A3, C4, D#3).")
+@click.option("--tempo", default=72, show_default=True, help="Tempo in BPM.")
+@click.option("--beat", default=240, show_default=True, help="Ticks per eighth note.")
+@click.option("--out", "out_dir", default="sonified", show_default=True,
+              type=click.Path(path_type=Path), help="Output directory for .mid files.")
+def corpus_sonify(
+    directory: Path, mapping: str, scale: str, root: str,
+    tempo: int, beat: int, out_dir: Path,
+) -> None:
+    """Sonify all poems in a corpus directory to MIDI files.
+
+    \b
+    nouveau corpus sonify corpora/mirror --map vowel --scale whole_tone
+    nouveau corpus sonify corpora/mirror --map sentiment --root C4 --tempo 60
+    """
+    from nouveau.sonify import MAPPING_FACTORIES, SCALES, parse_note, sonify
+
+    if mapping not in MAPPING_FACTORIES:
+        raise click.BadParameter(f"unknown mapping '{mapping}'", param_hint="--map")
+    if scale not in SCALES:
+        raise click.BadParameter(f"unknown scale '{scale}'", param_hint="--scale")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    poems = _load_corpus(directory)
+    click.echo(f"Sonifying {len(poems)} poems [{mapping} / {scale} / {root} / {tempo}bpm]\n")
+
+    for path, poem in poems:
+        out = out_dir / path.stem
+        out = out.with_suffix(".mid")
+        sonify(poem, out, mapping=mapping, scale=scale, root=root, tempo_bpm=tempo, beat=beat)
+        click.echo(f"  {out}")
+    click.echo(f"\n{len(poems)} files written to {out_dir}/")
+
+
+@cli.command("sonify")
+@click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--map", "mapping", default="vowel", show_default=True,
+              help="Mapping strategy.")
+@click.option("--scale", default="minor_pentatonic", show_default=True, help="Scale name.")
+@click.option("--root", default="A3", show_default=True, help="Root note.")
+@click.option("--tempo", default=72, show_default=True, help="Tempo in BPM.")
+@click.option("--beat", default=240, show_default=True, help="Ticks per eighth note.")
+@click.option("--out", "out_path", default=None, type=click.Path(path_type=Path),
+              help="Output .mid path (default: same name as input, .mid extension).")
+@click.option("--features", is_flag=True, default=False,
+              help="Print extracted musical features after writing.")
+def sonify_cmd(
+    path: Path, mapping: str, scale: str, root: str,
+    tempo: int, beat: int, out_path: Path | None, features: bool,
+) -> None:
+    """Sonify a single poem to a MIDI file.
+
+    \b
+    nouveau sonify poem.json
+    nouveau sonify poem.json --map sentiment --scale whole_tone --root C4
+    nouveau sonify poem.json --features
+    """
+    from nouveau.sonify import (
+        MAPPING_FACTORIES, SCALES, note_features, parse_note,
+        poem_to_notes, sonify, MAPPINGS,
+    )
+
+    if mapping not in MAPPING_FACTORIES:
+        raise click.BadParameter(f"unknown mapping '{mapping}'", param_hint="--map")
+    if scale not in SCALES:
+        raise click.BadParameter(f"unknown scale '{scale}'", param_hint="--scale")
+
+    poem = Poem.load(path)
+    dest = out_path or path.with_suffix(".mid")
+    sonify(poem, dest, mapping=mapping, scale=scale, root=root, tempo_bpm=tempo, beat=beat)
+    click.echo(f"Written: {dest}")
+
+    if features:
+        r = parse_note(root)
+        from nouveau.sonify import MAPPING_FACTORIES as mf
+        m = mf[mapping](root=r, scale=scale, beat=beat)
+        from nouveau.sonify import poem_to_notes, note_features
+        notes = poem_to_notes(poem, m)
+        f = note_features(notes)
+        click.echo(f"\npitch_entropy:    {f['pitch_entropy']:.3f}  (0=drone, 1=maximally varied)")
+        click.echo(f"distinct_pitches: {f['distinct_pitches']}")
+        click.echo(f"pitch_range:      {f['pitch_range']} semitones")
+        click.echo(f"rest_ratio:       {f['rest_ratio']:.3f}  (fraction of time silent)")
+        click.echo(f"mean_pitch:       {f['mean_pitch']:.1f} MIDI")
 
 
 @cli.command("list")
